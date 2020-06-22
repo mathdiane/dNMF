@@ -670,6 +670,7 @@ class dNMF:
         Writer = animation.writers['ffmpeg']
         writer = Writer(fps=10, metadata=dict(artist='Me'), bitrate=1800)
         anim.save(file+'-neurons.mp4', writer=writer)
+        plt.close('all')
 
     # %% Saving 
     def save_results(self, file, trace_array, neuron_names, sort_indices=[]):
