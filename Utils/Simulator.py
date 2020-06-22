@@ -16,7 +16,7 @@ from scipy.sparse import rand
 from Utils import Utils
 from torch.distributions import normal
 from scipy.stats import multivariate_normal
-from Utils.Transformations import rotation_matrix
+from .Transformations import rotation_matrix
 
 def plot_trajectory(P1,P2):
     import matplotlib.pyplot as plt
