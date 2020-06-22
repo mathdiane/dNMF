@@ -6,8 +6,8 @@ Created on Thu Apr 23 19:12:23 2020
 """
 
 #from DataHandling import DataHandler
-from Demix.dNMF import dNMF
-from Utils import Simulator
+from .dNMF import dNMF
+from ..Utils import Simulator
 
 #def demix_video(file, times=None):
 #    video, positions, scale, trace_array, neuron_names, sort_indices = DataHandler.load_video(file, is_sorted=True, times=times)
