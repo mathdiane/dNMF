@@ -7,7 +7,6 @@ Created on Thu Apr 23 19:10:26 2020
 import matplotlib
 matplotlib.rcParams['font.family'] = "Times New Roman"
 
-from Methods.ID.Atlas import Atlas
 from Demix import Demix
 import numpy as np
 import glob
