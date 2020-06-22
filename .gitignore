@@ -136,3 +136,9 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+
+# images and videos
+*.mp4
+*.png
+*.jpg

@@ -47,7 +47,8 @@ A = m.apply_shifts_frame(data,positions[:,:,0].numpy(),1)
 A = torch.tensor(A).float()
 n_nmf = dNMF(torch.tensor(m.mc[0]).float(),positions=A[:,:,np.newaxis],\
             radius=params['radius'],step_S=params['step_S'],gamma=params['gamma'],
-            use_gpu=False,initial_p=A,sigma_inv=params['sigma_inv'], method='1->t', verbose=False)
+            use_gpu=False,initial_p=A,sigma_inv=params['sigma_inv'],
+            method='1->t', verbose=True)
 n_nmf.optimize(lr=.1,n_iter=0,n_iter_c=20)
 end = time.time()
 print('normcorre-nmf finished in ' + str(end-start) + ' seconds')
@@ -55,8 +56,11 @@ print('normcorre-nmf finished in ' + str(end-start) + ' seconds')
 start = time.time()
 dnmf = dNMF(video,positions=positions[:,:,0][:,:,np.newaxis],\
     radius=params['radius'],step_S=params['step_S'],gamma=params['gamma'],
-    use_gpu=False,initial_p=positions[:,:,0],sigma_inv=params['sigma_inv'], method='1->t', verbose=False)
+    use_gpu=False,initial_p=positions[:,:,0],sigma_inv=params['sigma_inv'],
+    method='1->t', verbose=True)
 
-dnmf.optimize(lr=.1,n_iter=20,n_iter_c=2)
+dnmf.optimize(lr=1e-4,n_iter=20,n_iter_c=2)
 end = time.time()
 print('dNMF finished in ' + str(end-start) + ' seconds')
+
+dnmf.visualize_tracks('result',video)
