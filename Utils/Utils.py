@@ -7,7 +7,7 @@ Created on Thu Apr 23 19:11:25 2020
 
 
 from scipy.ndimage import affine_transform
-from Utils import Transformations
+from . import Transformations
 import numpy as np
 import torch
  # Helper Function for Grabbing a Patch from a Multicolor Volume
