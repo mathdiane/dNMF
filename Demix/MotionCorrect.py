@@ -40,7 +40,7 @@ Copyright (C) 2011, the scikit-image team
 
 from skimage.transform import resize as resize_sk
 from skimage.transform import warp as warp_sk
-from Methods.Demix.MotionCorrect import *
+from Demix.MotionCorrect import *
 from scipy.spatial import distance
 from numpy.fft import ifftshift
 from past.utils import old_div
