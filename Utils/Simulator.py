@@ -13,7 +13,7 @@ Created on Thu Apr 23 19:11:25 2020
 import torch
 import numpy as np
 from scipy.sparse import rand
-from Utils import Utils
+from . import Utils
 from torch.distributions import normal
 from scipy.stats import multivariate_normal
 from .Transformations import rotation_matrix
