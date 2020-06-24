@@ -192,8 +192,8 @@ class dNMF:
             
             
             if sample_size is not None:
-                y_ind = np.random.randint(0,self.Y.shape[0]-1,sample_size[0])
-                t_ind = np.random.randint(0,self.Y.shape[1]-1,sample_size[1])
+                y_ind = np.random.randint(0,self.Y.shape[0],sample_size[0])
+                t_ind = np.random.randint(0,self.Y.shape[1],sample_size[1])
                 t_ind.sort()
             
             self.update_C(t_ind,y_ind)
@@ -228,8 +228,8 @@ class dNMF:
         
         for inner_iter in range(n_iter_c):
             if sample_size is not None:
-                y_ind = np.random.randint(0,self.Y.shape[0]-1,sample_size[0])
-                t_ind = np.random.randint(0,self.Y.shape[1]-1,sample_size[1])
+                y_ind = np.random.randint(0,self.Y.shape[0],sample_size[0])
+                t_ind = np.random.randint(0,self.Y.shape[1],sample_size[1])
                 t_ind.sort()
             
             if self.verbose:
