@@ -2,7 +2,7 @@
 
 from matplotlib_scalebar.scalebar import ScaleBar
 import matplotlib.animation as animation
-from WUtils import Utils
+from ..WUtils import Utils
 import matplotlib.pyplot as plt
 from scipy.ndimage import zoom
 from scipy.io import savemat
