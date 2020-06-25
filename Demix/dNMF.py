@@ -2,17 +2,32 @@
 
 from matplotlib_scalebar.scalebar import ScaleBar
 import matplotlib.animation as animation
-from scipy.spatial.distance import cdist
-from Utils import Utils
+from WUtils import Utils
 import matplotlib.pyplot as plt
 from scipy.ndimage import zoom
 from scipy.io import savemat
 import torch.optim as optim
 import numpy as np
 import torch
+from scipy.ndimage import convolve
+
 
 class dNMF:
     eps = 1e-32
+    
+    @staticmethod
+    def create_spherical_filter(position,radius,scale=[1,1,1]):
+        coords = [[x,y,z] for x in range(position[0]-int(radius//scale[0]),int(position[0]+radius//scale[0])) 
+                          for y in range(position[1]-int(radius//scale[1]),int(position[1]+radius//scale[1]))
+                          for z in range(position[2]-int(radius//scale[2]),int(position[2]+radius//scale[2]))
+                          if x**2*scale[0]+y**2*scale[1]+z**2*scale[2]<radius**2]
+        
+        coords = np.array(coords)
+        coords = coords-coords.min(0)
+        filt = np.zeros(coords.max(0)+1)
+        ind = np.ravel_multi_index(coords.T,coords.max(0)+1)
+        filt.ravel()[ind] = 1
+        return filt,np.array(coords)
     
     @staticmethod
     def optimize_sequential(video,initial_p,scale=torch.tensor([1,1,1]).float(),radius=3,step_S=.0,gamma=.0,use_gpu=False,\
@@ -114,15 +129,26 @@ class dNMF:
         
         if positions is None:
             positions = self.A[:,:,np.newaxis]
-            
+        
+        
         sz = video.shape
         pos = torch.tensor(np.array(np.where(np.ones(sz[0:3]))).T)
-        a = positions.permute([1,0,2]).reshape(3,int(positions.numel()/3)).t()
-        keep_indices = np.where(cdist((a.float()*scale.reshape(1,3)).half(), (pos.float()*scale.reshape(1,3)).half()).min(0)<self.radius.cpu().numpy())
         
-        if type(keep_indices) is tuple and len(keep_indices) > 1:
-            keep_indices = keep_indices[1]
-        P = pos[torch.tensor(np.array(keep_indices).T),:].squeeze().float()
+        if len(positions.shape) == 2:
+            positions = positions.copy()[:,:,np.newaxis]
+            
+        a = positions.permute([1,0,2]).reshape(3,int(positions.numel()/3)).t()
+        
+        ind = np.ravel_multi_index(a.numpy().T.astype(int),np.array(video.shape[0:3]).astype(int))
+        mask = np.zeros(video.shape[0:3])
+        mask.ravel()[ind] = 1
+        filt,_ = dNMF.create_spherical_filter([0,0,0],radius,scale)
+        maskc = convolve(mask,filt)
+        maskc[maskc>0] = 1
+        
+        keep_indices = np.where(maskc.flatten()>0)
+        
+        P = pos[keep_indices,:].squeeze().float()
         self.P = P.to(device=self.device)
             
         Y = video.reshape([int(float(video.numel())/video.shape[3]), video.shape[3]]).squeeze()
@@ -141,7 +167,7 @@ class dNMF:
             LL_init = torch.zeros((K))
             for k in range(K):
                 LL_init[k] = sigma_inv
-            self.LL = LL_init.clone().detach().requires_grad_(False).to(device=self.device)
+            self.LL = LL_init.clone().detach().requires_grad_(True).to(device=self.device)
 
         
             
@@ -179,7 +205,7 @@ class dNMF:
     
     def optimize(self,lr=.1,n_iter=100,n_iter_c=20,sample_size=None):
 #        optimizer = optim.SGD({self.B}, lr=lr)
-        optimizer = optim.Adam({self.B}, lr=lr)
+        optimizer = optim.Adam({self.B,self.LL}, lr=lr)
         
         if sample_size is None:
             y_ind = np.arange(self.Y.shape[0])
