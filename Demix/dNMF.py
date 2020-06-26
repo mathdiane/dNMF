@@ -139,6 +139,9 @@ class dNMF:
             
         a = positions.permute([1,0,2]).reshape(3,int(positions.numel()/3)).t()
         
+        a = a[~(a > torch.tensor(video.shape[:3])[np.newaxis,:]).any(1),:]
+        a = a[~(a < torch.tensor([0,0,0])[np.newaxis,:]).any(1),:]
+        
         ind = np.ravel_multi_index(a.numpy().T.astype(int),np.array(video.shape[0:3]).astype(int))
         mask = np.zeros(video.shape[0:3])
         mask.ravel()[ind] = 1
