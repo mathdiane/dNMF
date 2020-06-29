@@ -66,19 +66,15 @@ class dNMF:
             dnmf.B = B[:,:,s_t:e_t].requires_grad_(True)
             
             dnmf.update_C()
-#            dnmf.C = C[:,s_t].repeat((dnmf.C.shape[1],1)).T
-            
             dnmf.optimize(lr,n_iter=n_iter,n_iter_c=c_iter)
             
             C[:,  s_t:e_t] = dnmf.C.requires_grad_(False)
             B[:,:,s_t:e_t] = dnmf.B.detach().requires_grad_(False)
             P[:,:,s_t:e_t] = dnmf.get_positions().detach().requires_grad_(False)
-#            B0[:,:,s_t:e_t] = dnmf.B0.detach().requires_grad_(False)
             
         dnmf = dNMF(dvideo,positions=P[:,:,0][:,:,np.newaxis],radius=radius,step_S=step_S,gamma=gamma,use_gpu=use_gpu,initial_p=A,sigma_inv=sigma_inv,method=method)
         dnmf.B = B
         dnmf.C = C
-#        dnmf.B0 = B0
         
         return dnmf,dvideo
         
@@ -207,7 +203,6 @@ class dNMF:
         self.verbose = verbose
     
     def optimize(self,lr=.1,n_iter=100,n_iter_c=20,sample_size=None):
-#        optimizer = optim.SGD({self.B}, lr=lr)
         optimizer = optim.Adam({self.B,self.LL}, lr=lr)
         
         if sample_size is None:
@@ -282,7 +277,6 @@ class dNMF:
             
                 
                 A = A_p@self.B[:,:,t]
-#                A = A_p@self.B[:,:,t] + self.B0[:,:,t]
                 
                 if t==0 and self.Y.shape[1] > 1:
                     S = self.C[:,t+1]; factor=1
@@ -313,13 +307,11 @@ class dNMF:
                          (A[:,0]*A[:,2]).unsqueeze(1),(A[:,1]*A[:,2]).unsqueeze(1)), 1).to(device=self.device)
             
             A = A_p@self.B[:,:,t]
-#            + self.B0[:,:,t]
             
             cost = cost + self.gamma*(dNMF.det_jac(self.B[:,:,t],self.P.min(0)[0])-1)**2 \
                         + self.gamma*(dNMF.det_jac(self.B[:,:,t],self.P.min(0)[0])-1)**2
             
             if t > 1:
-#                cost = cost + self.gamma*((self.B[:,:,t] - self.B[:,:,t-1])**2).mean()
                 cost = cost + self.gamma*((A_p@self.B[:,:,t] - A_p@self.B[:,:,t-1])**2).mean()
             
             a_ks = torch.exp(-0.5*dNMF.pairwise_distances(self.P[indices,:]*self.scale, A*self.scale)*self.LL)
@@ -353,7 +345,6 @@ class dNMF:
                          (A[:,0]*A[:,2]).unsqueeze(1),(A[:,1]*A[:,2]).unsqueeze(1)), 1).to(device=self.device)
             
             positions[:,:,t] = A_p@self.B[:,:,t]
-#            +self.B0[:,:,t]
         
         return positions.detach()
     
@@ -386,6 +377,7 @@ class dNMF:
     @staticmethod
     def det_jac(B,P):
         x,y,z = P[0],P[1],P[2]
+        
 #        jac = torch.tensor([[B[1,0]+2*B[4,0]*x+B[8,0]*y+B[9,0]*z, B[2,0]+2*B[5,0]*y+B[7,0]*x+B[8,0]*y, B[3,0]+2*B[6,0]*z+B[8,0]*y+B[9,0]*x ], 
 #                            [B[1,1]+2*B[4,1]*x+B[8,1]*y+B[9,1]*z, B[2,1]+2*B[5,1]*y+B[7,1]*x+B[8,1]*y, B[3,1]+2*B[6,1]*z+B[8,1]*y+B[9,1]*x ],
 #                            [B[1,2]+2*B[4,2]*x+B[8,2]*y+B[9,2]*z, B[2,2]+2*B[5,2]*y+B[7,2]*x+B[8,2]*y, B[3,2]+2*B[6,2]*z+B[8,2]*y+B[9,2]*x ]])
@@ -471,10 +463,16 @@ class dNMF:
 
     
     
-    def visualize_raw(self, file, video):
+    def visualize_raw(self, file, video, fontsize=20):
         fig, ax = plt.subplots(figsize=(10,10))
         im = ax.imshow(video[:,:,:,0].max(2)[0].squeeze())
-
+        
+        time_text = fig.text(0.5, 0.03,'Frame = 0',horizontalalignment='center',verticalalignment='top',fontsize=fontsize)
+        
+        ax.axis('off')
+        scalebar = ScaleBar(self.scale[0,0],'um')
+        ax.add_artist(scalebar)
+        
         def init():
             im.set_data(video[:,:,:,0].max(2)[0].squeeze())
             return (im,)
@@ -482,6 +480,8 @@ class dNMF:
         def animate(t):
             data_slice = video[:,:,:,t].max(2)[0].squeeze()
             im.set_data(data_slice)
+            
+            time_text.set_text('Frame = ' + str(t))
             
             return (im,)
     
@@ -501,6 +501,8 @@ class dNMF:
         im = ax.imshow(video[:,:,:,0].max(2)[0].squeeze())
         sc = ax.scatter(self.A[:,1], self.A[:,0],marker='x',color=self.pseudo_colors)
         
+        time_text = fig.text(0.5, 0.03,'Frame = 0',horizontalalignment='center',verticalalignment='top',fontsize=fontsize)
+        
         ax.axis('off')
         scalebar = ScaleBar(self.scale[0,0],'um')
         ax.add_artist(scalebar)
@@ -518,7 +520,8 @@ class dNMF:
         
         if positions is None:
             positions = self.get_positions()
-        # animation function. This is called sequentially
+        
+        
         def animate(t):
             P_t = positions[:,:,t]
             data_slice = video[:,:,:,t].max(2)[0].squeeze()
@@ -529,6 +532,7 @@ class dNMF:
                 for i in range(len(labels)):
                     annot[i].set_x(P_t[i,1])
                     annot[i].set_y(P_t[i,0])
+            time_text.set_text('Frame = ' + str(t))
             
             return (im,)
     
@@ -568,54 +572,47 @@ class dNMF:
             
             
     def visualize_neurons(self, file, neurons_plot, neuron_names, video, window=np.array([10,10,1]), fontsize=20):
-        neurons = [neurons_plot[i] for i in range(len(neurons_plot)) if neurons_plot[i]+'L' in neuron_names and neurons_plot[i]+'R' in neuron_names]
-        
-        indices_L = [neuron_names.index(neurons[i]+'L') for i in range(len(neurons))]
-        indices_R = [neuron_names.index(neurons[i]+'R') for i in range(len(neurons))]
-        
-        if not neurons:
-            neurons = [neurons_plot[i] for i in range(len(neurons_plot)) if neurons_plot[i] in neuron_names]
-            
-            indices_L = [neuron_names.index(neurons[i]) for i in range(len(neurons))]
-            indices_R = [neuron_names.index(neurons[i]) for i in range(len(neurons))]
-            
+        neurons = [[neurons_plot[i][j] for j in range(len(neurons_plot[0])) if neurons_plot[i][j] in neuron_names] for i in range(len(neurons_plot))]
+        indices = [[neuron_names.index(neurons[i][j]) for j in range(len(neurons[0]))] for i in range(len(neurons))]
             
         fact = 5/video.max()
         video = fact*video
-        def clean_ax(ax):
+        
+        def clean_ax(ax,add_scalebar=True):
+            
             ax.set_yticklabels([])
             ax.set_xticklabels([])
             ax.set_yticks([])
             ax.set_xticks([])
             ax.autoscale(False)
-            scalebar = ScaleBar(self.scale[0,0],'um')
-            ax.add_artist(scalebar)
             
+            if add_scalebar:
+                scalebar = ScaleBar(self.scale[0,0],'um')
+                ax.add_artist(scalebar)
+            
+        
         colors = self.pseudo_colors
         
         positions = self.get_positions()
         
-        fig = plt.figure(figsize=(len(neurons)*4,20),constrained_layout=True)
-        gs = fig.add_gridspec(6, len(neurons))
-        ax_main = fig.add_subplot(gs[0:2, 0:int(len(neurons)/2)])
-        ax_reco = fig.add_subplot(gs[0:2, int(len(neurons)/2):])
+        fig = plt.figure(figsize=(10,(10)*(2+2*len(neurons))/len(neurons[0])),constrained_layout=True)
+        gs = fig.add_gridspec(4+4*len(neurons), 2*len(neurons[0]))
+        ax_main = fig.add_subplot(gs[0:4, 0:int(len(neurons[0]))])
+        ax_reco = fig.add_subplot(gs[0:4, int(len(neurons[0])): ])
         
-        
+        time_text = fig.text(0.5, 1.0,'Frame = 0',horizontalalignment='center',verticalalignment='top',fontsize=fontsize)
     
-    
-        P_L = positions[indices_L,:,:].detach().numpy()
-        P_R = positions[indices_R,:,:].detach().numpy()
+        P = np.array([positions[ind,:,:].detach().numpy() for ind in indices])
         
-        
-        im = [[None for j in range(len(neurons))] for i in range(2,6)]
-        ax = [[None for j in range(len(neurons))] for i in range(2,6)]
+        im = [[None for j in range(len(neurons[0]))] for i in range(2*len(neurons))]
+        ax = [[None for j in range(len(neurons[0]))] for i in range(2*len(neurons))]
         
         data_slice = video[:,:,:,0].max(2)[0]
         im_main = ax_main.imshow(data_slice,vmin=0,vmax=1)
-        sr_main = ax_main.scatter(P_R[:,1,0],P_R[:,0,0],s=1,color='r',marker='x')
-        sl_main = ax_main.scatter(P_L[:,1,0],P_L[:,0,0],s=1,color='g',marker='x')
-        ar_main = [ax_main.text(P_R[i,1,0], P_R[i,0,0],neurons[i]+'R',color=self.pseudo_colors[indices_R[i]]) for i in range(len(neurons))]
-        al_main = [ax_main.text(P_L[i,1,0], P_L[i,0,0],neurons[i]+'L',color=self.pseudo_colors[indices_L[i]]) for i in range(len(neurons))]
+        
+        s_main = ax_main.scatter(P[:,:,1,0],P[:,:,0,0],s=1,color='r',marker='x')
+        r_main = [[ax_main.text(P[i,j,1,0].flatten(), P[i,j,0,0].flatten(), neurons[i][j], color=self.pseudo_colors[indices[i][j]]) for j in range(len(neurons[0]))] for i in range(len(neurons))]
+        
         
         im_reco = ax_reco.imshow(data_slice,vmin=0,vmax=1)
         
@@ -623,31 +620,18 @@ class dNMF:
         ax_reco.set_title('Reconstruction',fontsize=fontsize)
         ax_main.set_title('Data',fontsize=fontsize)
         
-        clean_ax(ax_reco)
-        clean_ax(ax_main)
+        clean_ax(ax_reco,add_scalebar=True)
+        clean_ax(ax_main,add_scalebar=False)
         
-        
-        for i in range(2,6):
-            for j in range(len(neurons)):
-                ax[i-2][j] = fig.add_subplot(gs[i,j])
-                im[i-2][j] = ax[i-2][j].imshow(np.zeros((window[0]*2+1,window[0]*2+1)),vmin=0,vmax=1)
+        for i in range(2*len(neurons)):
+            for j in range(len(neurons[0])):
+                ax[i][j] = fig.add_subplot(gs[2*i+4:2*i+6,2*j:2*j+2])
+                im[i][j] = ax[i][j].imshow(np.zeros((window[0]*2+1,window[0]*2+1)),vmin=0,vmax=1)
+                ax[i][j].set_title(neurons[i//2][j],fontsize=fontsize)
                 
-                if i == 2:
-                    ax[i-2][j].set_title(neurons[j],fontsize=fontsize)
-                if j == 0:
-                    if i == 2:
-                        ax[i-2][j].set_ylabel('L',fontsize=fontsize)
-                    elif i == 3:
-                        ax[i-2][j].set_ylabel('R',fontsize=fontsize)
-                    elif i == 4:
-                        ax[i-2][j].set_ylabel('L',fontsize=fontsize)
-                    elif i == 5:
-                        ax[i-2][j].set_ylabel('R',fontsize=fontsize)
-                        
-                clean_ax(ax[i-2][j])
+                clean_ax(ax[i][j],add_scalebar=(i==0 and j==0))
         
-        
-        P = torch.tensor(np.array(np.where(np.ones(video.shape[0:3]))).T).float()
+        Ps = torch.tensor(np.array(np.where(np.ones(video.shape[0:3]))).T).float()
         pos = torch.tensor(np.array(np.where(np.ones(2*window+1))).T).float()
         
         def animate(t):
@@ -656,42 +640,35 @@ class dNMF:
             
             data_slice = video[:,:,:,t].max(2)[0]
             im_main.set_data(data_slice)
-            sr_main.set_offsets(P_R[:,[1,0],t])
-            sl_main.set_offsets(P_L[:,[1,0],t])
+            s_main.set_offsets(P[:,:,[1,0],t].reshape(-1,2))
             
-            a_k = (self.C[:,t]*torch.exp(-0.5*self.LL.detach()*dNMF.pairwise_distances(P*self.scale,positions[:,:,t]*self.scale))@colors)
+            a_k = (self.C[:,t]*torch.exp(-0.5*self.LL.detach()*dNMF.pairwise_distances(Ps*self.scale,positions[:,:,t]*self.scale))@colors)
             data_slice = (fact*a_k.reshape((video.shape[0],video.shape[1],video.shape[2],3))).max(2)[0]
             data_slice[data_slice < 0] = 0
             data_slice[data_slice > 1] = 1
             im_reco.set_data(data_slice)
             
-            for j in range(len(neurons)):
-                ar_main[j].set_x(P_R[j,[1],t])
-                ar_main[j].set_y(P_R[j,[0],t])
-                
-                al_main[j].set_x(P_L[j,[1],t])
-                al_main[j].set_y(P_L[j,[0],t])
+            for i in range(len(neurons)):
+                for j in range(len(neurons[0])):
+                    r_main[i][j].set_x(P[i,j,[1],t].flatten())
+                    r_main[i][j].set_y(P[i,j,[0],t].flatten())
+                    
             
             
-            for i in range(2,6):
-                for j in range(len(neurons)):
-                    if i == 2:
-                        patch = Utils.subcube(video[:,:,:,t][:,:,:,np.newaxis], P_L[j,:,t], window).max(2)[0].squeeze()
-                    elif i == 3:
-                        patch = Utils.subcube(video[:,:,:,t][:,:,:,np.newaxis], P_R[j,:,t], window).max(2)[0].squeeze()
+            for i in range(2*len(neurons)):
+                for j in range(len(neurons[0])):
+                    if i%2==0:
+                        patch = Utils.subcube(video[:,:,:,t][:,:,:,np.newaxis], P[i//2,j,:,t], window).max(2)[0].squeeze()
                     else:
-                        if i == 4:
-                            k = indices_L[j]
-                        elif i == 5:
-                            k = indices_R[j]
-                            
+                        k = indices[i//2][j]
                         a_k = (self.C[:,t]*torch.exp(-0.5*self.LL.detach()*dNMF.pairwise_distances(pos*self.scale,(positions[:,:,t] - positions[k,:,t] + torch.tensor(window).float())*self.scale))@colors)
                         patch = (fact*a_k.reshape((2*window[0]+1,2*window[1]+1,2*window[2]+1,3))).max(2)[0]
                         
                         patch[patch < 0] = 0
                         patch[patch > 1] = 1
-                    im[i-2][j].set_data(patch)
+                    im[i][j].set_data(patch)
                     
+            time_text.set_text('Frame = ' + str(t))
             return (im_main,)
     
         anim = animation.FuncAnimation(fig, animate, frames=video.shape[3], interval=200, blit=False)

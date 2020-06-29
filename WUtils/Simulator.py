@@ -87,8 +87,8 @@ def simulate_quadratic_sequential_trajectory(K,T,means=[.0,.0,.0],variances=[.00
 
 def simulate_quadratic_trajectory(K,T,variances=[.001,.001,.00001],sz=[20,20,1]):
     B0 = torch.tensor([[0,1,0,0,0,0,0,0,0,0], \
-                      [0,0,1,0,0,0,0,0,0,0], \
-                      [0,0,0,1,0,0,0,0,0,0]]).t().float()
+                       [0,0,1,0,0,0,0,0,0,0], \
+                       [0,0,0,1,0,0,0,0,0,0]]).t().float()
          
     a = torch.cumsum(normal.Normal(0,1).sample((T,3,10)),0)
     b = torch.tensor([variances]).t()*a.permute([1,0,2]).permute([2,0,1])
@@ -240,4 +240,6 @@ def compute_snr_motion(stds=[1e-3,1e-3,1e-5]):
                    [0,0,0,1,0,0,0,0,0,0]])
     SNR = np.log((B0**2).sum()) - np.log(stds[0]**2*B0.size/3+stds[1]**2*B0.size/3+stds[2]**2*B0.size/3)
     return SNR
-    
+
+def compute_snr_positions(positions):
+    return np.log((positions[:,:,0]**2).sum()) - np.log(np.array([((positions[:,:,t] - positions[:,:,0])**2).sum() for t in range(1,positions.shape[2])]).mean())
