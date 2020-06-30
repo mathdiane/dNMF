@@ -15,192 +15,162 @@ from scipy.ndimage import convolve
 class dNMF:
     eps = 1e-32
     
-    @staticmethod
-    def create_spherical_filter(position,radius,scale=[1,1,1]):
-        coords = [[x,y,z] for x in range(position[0]-int(radius//scale[0]),int(position[0]+radius//scale[0])) 
-                          for y in range(position[1]-int(radius//scale[1]),int(position[1]+radius//scale[1]))
-                          for z in range(position[2]-int(radius//scale[2]),int(position[2]+radius//scale[2]))
-                          if x**2*scale[0]+y**2*scale[1]+z**2*scale[2]<radius**2]
-        
-        coords = np.array(coords)
-        coords = coords-coords.min(0)
-        filt = np.zeros(coords.max(0)+1)
-        ind = np.ravel_multi_index(coords.T,coords.max(0)+1)
-        filt.ravel()[ind] = 1
-        return filt,np.array(coords)
+    default_params = {'positions':None,
+                      'scale':torch.tensor([1,1,1]).float(),
+                      'radius':3,
+                      'step_S':0.,
+                      'gamma':0.,
+                      'use_gpu':False,
+                      'initial_p':None,
+                      'sigma_inv':2,
+                      'method':'1->t',
+                      'verbose':True}
     
-    @staticmethod
-    def optimize_sequential(video,initial_p,scale=torch.tensor([1,1,1]).float(),radius=3,step_S=.0,gamma=.0,use_gpu=False,\
-                            sigma_inv=.1,lr=.1,b_iter=10,c_iter=2,n_iter=2,dscale=(1,1,1,1),batchsize=12,overlap=2,method='1->t'):
-        T = video.shape[3]
-        K = initial_p.shape[0]
+    def online_optimization(self, video, times, params={}):
+        default_params = dNMF.default_params.copy()
+        default_params.update(self.params.copy())
         
-        dvideo,dpositions = dNMF.decimate_video(video,initial_p,dscale)
-        dvideo = torch.tensor(dvideo).float()
-        dpositions = torch.tensor(dpositions).float()
-        
-        B = torch.cat((torch.zeros(1,3), torch.eye(3), torch.zeros(6,3)),0)[:,:,np.newaxis].repeat(1,1,T).float()
-        C = torch.zeros((K,T)).float()
-        A = dpositions
-        P = torch.zeros((K,3,T)).float()
-        P[:,:,0] = initial_p
-#        B0 = torch.zeros((1,3,T))
-        
-        
-        
-        for t in range(0,T,batchsize-overlap):
-            print('t = ' + str(t))
-#            with torch.no_grad():
-#                b,p = ot_registration.initialize_beta(P[:,:,t-1],1+0*C[:,t-1].double().detach().numpy(),dvideo[:,:,:,t],n_iter=20,mp_var=[5,5,5],mp_k=int(1.5*K),alpha=1)
-#                B[:,:,t] = torch.tensor(b)
+        if not hasattr(self, 'times'):
+            self.times = np.arange(0,self.B.shape[2])
             
-            s_t = t
-            e_t = t+batchsize+1
-            
-            if e_t > T:
-                e_t = T
-                
-            print('start: ' + str(s_t) + ', end: ' + str(e_t))
-            dnmf = dNMF(dvideo[:,:,:,s_t:e_t],positions=P[:,:,s_t:e_t],radius=radius,step_S=step_S,\
-                        gamma=gamma,use_gpu=use_gpu,initial_p=P[:,:,s_t],sigma_inv=sigma_inv,method=method)
-            dnmf.B = B[:,:,s_t:e_t].requires_grad_(True)
-            
-            dnmf.update_C()
-            dnmf.optimize(lr,n_iter=n_iter,n_iter_c=c_iter)
-            
-            C[:,  s_t:e_t] = dnmf.C.requires_grad_(False)
-            B[:,:,s_t:e_t] = dnmf.B.detach().requires_grad_(False)
-            P[:,:,s_t:e_t] = dnmf.get_positions().detach().requires_grad_(False)
-            
-        dnmf = dNMF(dvideo,positions=P[:,:,0][:,:,np.newaxis],radius=radius,step_S=step_S,gamma=gamma,use_gpu=use_gpu,initial_p=A,sigma_inv=sigma_inv,method=method)
-        dnmf.B = B
-        dnmf.C = C
-        
-        return dnmf,dvideo
-        
-    
-    def __init__(self,video,positions=None,scale=torch.tensor([1,1,1]).float(),radius=3,\
-                 step_S=0.,gamma=0.,use_gpu=False,initial_p=None,sigma_inv=2,method='1->t',
-                 params=None,verbose=True):
-        
-        if use_gpu and torch.cuda.is_available():
-            self.device = torch.device('cuda')
+        positions = torch.zeros((self.A.shape[0], 3, times.max()+1))
+        if hasattr(self, 'positions'):
+            positions[:,:,:self.positions.shape[2]] = self.positions.clone()
+            positions[:,:,self.times] = self.get_positions()
         else:
-            self.device = torch.device('cpu')
+            positions[:,:,:self.B.shape[2]] = self.get_positions()
             
-        if params is not None:
-            if 'C' in params.keys():
-                self.C = torch.tensor(params['C']).to(device=self.device)
-            if 'B' in params.keys():
-                self.B = torch.tensor(params['B']).detach().requires_grad_(True).to(device=self.device)
-            if 'A' in params.keys():
-                self.A = torch.tensor(params['A']).to(device=self.device)
-            if 'cost' in params.keys():
-                self.cost = torch.tensor(params['cost']).to(device=self.device)
-            if 'radius' in params.keys():
-                self.radius = torch.tensor(params['radius']).to(device=self.device)
-            if 'step_S' in params.keys():
-                self.step_S = torch.tensor(params['step_S']).to(device=self.device)
-            if 'gamma' in params.keys():
-                self.gamma = torch.tensor(params['gamma']).to(device=self.device)
-            if 'P' in params.keys():
-                self.P = torch.tensor(params['P']).to(device=self.device)
-            if 'scale' in params.keys():
-                self.scale = torch.tensor(params['scale']).float().to(device=self.device) # microns per pixel
+        if 'initial_p' not in params:
+            default_params['initial_p'] = self.get_positions()[:,:,self.times == times.min()].squeeze()
+        
+        if 'C' not in params:
+            default_params['C'] = self.C[:,self.times == times.min()].repeat((1,times.max()-times.min()+1)).clone()
+                    
+        default_params.update(params.copy())
+        
+        self.A,self.B,self.C,self.Y,_,_,_, \
+        _,_,_,_,_,self.BG,self.P, \
+        self.RE,self.verbose,self.LL = dNMF.initialize(video,default_params)
+        
+        self.positions = positions.clone()
+        self.times = times.copy()
         
         
-        
-        if not hasattr(self, 'radius'):
-            self.radius = torch.tensor(radius).float().to(device=self.device)
+    @staticmethod
+    def initialize(video, params):
+        if params['use_gpu'] and torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
             
-        if not hasattr(self, 'step_S'):
-            self.step_S = torch.tensor(step_S).float().to(device=self.device)
-        
-        if not hasattr(self, 'gamma'):
-            self.gamma = torch.tensor(gamma).float().to(device=self.device)
-        
-        if not hasattr(self, 'A'):
-            A = initial_p.clone()
-            self.A = A.detach().to(device=self.device)
-        
-        if positions is None:
-            positions = self.A[:,:,np.newaxis]
-        
-        
-        sz = video.shape
-        pos = torch.tensor(np.array(np.where(np.ones(sz[0:3]))).T)
-        
-        if len(positions.shape) == 2:
-            positions = positions.copy()[:,:,np.newaxis]
-            
-        a = positions.permute([1,0,2]).reshape(3,int(positions.numel()/3)).t()
-        
-        a = a[~(a > torch.tensor(video.shape[:3])[np.newaxis,:]).any(1),:]
-        a = a[~(a < torch.tensor([0,0,0])[np.newaxis,:]).any(1),:]
-        
-        ind = np.ravel_multi_index(a.numpy().T.astype(int),np.array(video.shape[0:3]).astype(int))
-        mask = np.zeros(video.shape[0:3])
-        mask.ravel()[ind] = 1
-        filt,_ = dNMF.create_spherical_filter([0,0,0],radius,scale)
-        maskc = convolve(mask,filt)
-        maskc[maskc>0] = 1
-        
-        keep_indices = np.where(maskc.flatten()>0)
-        
-        P = pos[keep_indices,:].squeeze().float()
-        self.P = P.to(device=self.device)
-            
-        Y = video.reshape([int(float(video.numel())/video.shape[3]), video.shape[3]]).squeeze()
-        Y = Y[keep_indices,:].squeeze()
-    
-        self.Y = Y.to(device=self.device)
-        
-        if not hasattr(self, 'method'):
-            self.method = method
-        
-        
-        if not hasattr(self, 'LL'):
-            K = positions.shape[0]
+        if 'C' in params.keys():
+            C = torch.tensor(params['C']).to(device=device)
+        else:
+            K = params['initial_p'].shape[0]
             T = video.shape[3]
-            
-            LL_init = torch.zeros((K))
-            for k in range(K):
-                LL_init[k] = sigma_inv
-            self.LL = LL_init.clone().detach().requires_grad_(True).to(device=self.device)
-
-        
-            
-        if not hasattr(self, 'C'):
             C = torch.rand(K,T)
-            self.C = C.to(device=self.device)
-        
-        if not hasattr(self, 'pseudo_colors'):
-            R = np.linspace(0,1,self.C.shape[0]+1)[0:-1]
-            color = plt.cm.hsv(R)[:,0:3]
-            np.random.shuffle(color)
+            C = C.to(device=device)
             
-            self.pseudo_colors = torch.tensor(color).float().to(device=self.device)
-        
-        if not hasattr(self, 'B'):
+        if 'B' in params.keys():
+            B = torch.tensor(params['B']).detach().requires_grad_(True).to(device=device)
+        else:
+            T = video.shape[3]
             B_init = torch.zeros((10,3,T))
             for t in range(T):
                 B_init[:,:,t] = torch.cat((torch.zeros(1,3), torch.eye(3), torch.zeros(6,3)),0)
         
             B = B_init.clone()
-            self.B = B.detach().requires_grad_(True).to(device=self.device)
+            B = B.detach().requires_grad_(True).to(device=device)
             
-        if not hasattr(self, 'BG'):
-            self.BG = torch.tensor(np.percentile(video,60)).to(device=self.device)
+        if 'A' in params.keys():
+            A = torch.tensor(params['A']).to(device=device)
+        else:
+            A = params['initial_p'].clone()
+            A = A.detach().to(device=device)
+            
+        radius = torch.tensor(params['radius']).to(device=device)
+        step_S = torch.tensor(params['step_S']).to(device=device)
+        gamma = torch.tensor(params['gamma']).to(device=device)
+            
         
-        if not hasattr(self, 'scale'):
-            self.scale = scale.reshape(1,3).to(device=self.device)
+        scale = torch.tensor(params['scale']).float().to(device=device).squeeze() # microns per pixel
             
-        self.RE = ((self.Y.clone())*0).to(device=self.device)
+        if 'LL' in params.keys():
+            LL = torch.tensor(params['LL']).float().to(device=device)
+        else:
+            K = params['initial_p'].shape[0]
+            LL_init = torch.zeros((K))
+            for k in range(K):
+                LL_init[k] = params['sigma_inv']
+            LL = LL_init.clone().detach().requires_grad_(True).to(device=device)
+            
+        if 'method' in params.keys():
+            method = params['method']
+        else:
+            method = method
         
-        if not hasattr(self, 'cost'):
-            self.cost = []
+        if 'BG' in params.keys():
+            BG = torch.tensor(params['BG']).to(device=device)
+        else:
+            BG = torch.tensor(np.percentile(video,60)).to(device=device)
+        
+        if 'cost' in params.keys():
+            cost = params['cost']
+        else:
+            cost = []
             
-        self.verbose = verbose
+        if 'pseudo_colors' in params.keys():
+            pseudo_colors = torch.tensor(params['pseudo_colors']).float().to(device=device)
+        else:
+            R = np.linspace(0,1,C.shape[0]+1)[0:-1]
+            color = plt.cm.hsv(R)[:,0:3]
+            np.random.shuffle(color)
+            
+            pseudo_colors = torch.tensor(color).float().to(device=device)
+        
+        if params['positions'] is None:
+            positions = A[:,:,np.newaxis]
+        else:
+            positions = params['positions']
+            
+        if len(positions.shape) == 2:
+            positions = positions.copy()[:,:,np.newaxis]
+            
+        sz = video.shape
+        pos = torch.tensor(np.array(np.where(np.ones(sz[0:3]))).T)
+        a = positions.permute([1,0,2]).reshape(3,int(positions.numel()/3)).t()
+        a = a[~(a > torch.tensor(video.shape[:3])[np.newaxis,:]).any(1),:]
+        a = a[~(a < torch.tensor([0,0,0])[np.newaxis,:]).any(1),:]
+        ind = np.ravel_multi_index(a.numpy().T.astype(int),np.array(video.shape[0:3]).astype(int))
+        mask = np.zeros(video.shape[0:3])
+        mask.ravel()[ind] = 1
+        
+        filt,_ = dNMF.create_spherical_filter([0,0,0],radius,scale.squeeze())
+        maskc = convolve(mask,filt)
+        maskc[maskc>0] = 1
+        
+        keep_indices = np.where(maskc.flatten()>0)
+        P = pos[keep_indices,:].squeeze().float()
+        Y = video.reshape([int(float(video.numel())/video.shape[3]), video.shape[3]]).squeeze()
+        Y = Y[keep_indices,:].squeeze()
+        
+        
+        P = P.to(device=device)
+        Y = Y.to(device=device)
+        RE = ((Y.clone())*0).to(device=device)
+        verbose = params['verbose']
+        
+        return A,B,C,Y,radius,scale,pseudo_colors,method,cost,device,gamma,step_S,BG,P,RE,verbose,LL
+        
+    def __init__(self,video,params={}):
+        default_params = dNMF.default_params.copy()
+        default_params.update(params.copy())
+        
+        self.params = params.copy()
+        
+        self.A,self.B,self.C,self.Y,self.radius,self.scale,self.pseudo_colors, \
+        self.method,self.cost,self.device,self.gamma,self.step_S,self.BG,self.P, \
+        self.RE,self.verbose,self.LL = dNMF.initialize(video,default_params)
     
     def optimize(self,lr=.1,n_iter=100,n_iter_c=20,sample_size=None):
         optimizer = optim.Adam({self.B,self.LL}, lr=lr)
@@ -325,7 +295,6 @@ class dNMF:
             corrcoeff = torch.sum(vx*vy)/(torch.sqrt(torch.sum(vx**2))*torch.sqrt(torch.sum(vy**2)))
             cost = cost + (1-corrcoeff)
 
-
 #            cost = cost + ((a_ks@self.C[:,t]-self.Y[indices,t]+self.BG)**2).mean()
                     
         
@@ -394,7 +363,20 @@ class dNMF:
         
         det = a*(e*i - f*h) - b*(d*i - f*g) + c*(d*h - e*g)
         return det
-
+    
+    @staticmethod
+    def create_spherical_filter(position,radius,scale=[1,1,1]):
+        coords = [[x,y,z] for x in range(position[0]-int(radius//scale[0]),int(position[0]+radius//scale[0])) 
+                          for y in range(position[1]-int(radius//scale[1]),int(position[1]+radius//scale[1]))
+                          for z in range(position[2]-int(radius//scale[2]),int(position[2]+radius//scale[2]))
+                          if x**2*scale[0]+y**2*scale[1]+z**2*scale[2]<radius**2]
+        coords = np.array(coords)
+        coords = coords-coords.min(0)
+        filt = np.zeros(coords.max(0)+1)
+        ind = np.ravel_multi_index(coords.T,coords.max(0)+1)
+        filt.ravel()[ind] = 1
+        return filt,np.array(coords)
+    
     # %% Visualization
     def visualize_stats(self,file,save=True,fontsize=20):
         
@@ -470,7 +452,7 @@ class dNMF:
         time_text = fig.text(0.5, 0.03,'Frame = 0',horizontalalignment='center',verticalalignment='top',fontsize=fontsize)
         
         ax.axis('off')
-        scalebar = ScaleBar(self.scale[0,0],'um')
+        scalebar = ScaleBar(self.scale[0],'um')
         ax.add_artist(scalebar)
         
         def init():
@@ -504,7 +486,7 @@ class dNMF:
         time_text = fig.text(0.5, 0.03,'Frame = 0',horizontalalignment='center',verticalalignment='top',fontsize=fontsize)
         
         ax.axis('off')
-        scalebar = ScaleBar(self.scale[0,0],'um')
+        scalebar = ScaleBar(self.scale[0],'um')
         ax.add_artist(scalebar)
         
         ax.set_title('Neural Centers', fontsize=fontsize)
@@ -563,7 +545,7 @@ class dNMF:
             plt.imshow(avg,vmin=0,vmax=1)
             plt.axis('off')
             plt.scatter(window[1],window[0],color=self.pseudo_colors[idx])
-            scalebar = ScaleBar(self.scale[0,0],'um')
+            scalebar = ScaleBar(self.scale[0],'um')
             plt.gca().add_artist(scalebar)
             plt.title(neurons[i])
             plt.savefig(file+'-'+neurons[i]+'.png')
@@ -587,7 +569,7 @@ class dNMF:
             ax.autoscale(False)
             
             if add_scalebar:
-                scalebar = ScaleBar(self.scale[0,0],'um')
+                scalebar = ScaleBar(self.scale[0],'um')
                 ax.add_artist(scalebar)
             
         
