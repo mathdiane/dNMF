@@ -3,8 +3,9 @@
 
 """
 
-The functions apply_shifts_dft, register_translation, _compute_error, _compute_phasediff, and _upsampled_dft are from
-SIMA (https://github.com/losonczylab/sima), licensed under the  GNU GENERAL PUBLIC LICENSE, Version 2, 1991.
+This file is imported from the CaImAn repository (https://github.com/flatironinstitute/CaImAn), which adapted the 
+functions apply_shifts_dft, register_translation, _compute_error, _compute_phasediff, and _upsampled_dft that 
+are from SIMA (https://github.com/losonczylab/sima), licensed under the  GNU GENERAL PUBLIC LICENSE, Version 2, 1991.
 These same functions were adapted from sckikit-image, licensed as follows:
 
 Copyright (C) 2011, the scikit-image team
