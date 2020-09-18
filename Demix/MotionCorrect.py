@@ -366,7 +366,7 @@ class MotionCorrect(object):
             P_T[:,:,t] = points.copy()
             P_T[:,0,t] = P_T[:,0,t]-shifts_x[t,shift_indices]+shifts_x[0,shift_indices]
             P_T[:,1,t] = P_T[:,1,t]-shifts_y[t,shift_indices]+shifts_y[0,shift_indices]
-            P_T[:,2,t] = P_T[:,2,t]-shifts_z[t,shift_indices]+shifts_z[0,shift_indices]
+            P_T[:,2,t] = P_T[:,2,t]+shifts_z[t,shift_indices]-shifts_z[0,shift_indices]
         
         return P_T
 

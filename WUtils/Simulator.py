@@ -129,16 +129,16 @@ def simulate_exponential_traces(K,T,density=.1):
     
     kernel = np.exp(np.arange(0,-3,-.3))
     for k in range(K):
-        a = rand(1, T, density=density, format='csr')
+        a = rand(1, T+len(kernel)-1, density=density, format='csr')
         a.data[:] = 1
-        traces[k,:] = np.convolve(np.array(a.todense()).flatten(), kernel, 'same')
+        traces[k,:] = np.convolve(np.array(a.todense()).flatten(), kernel, 'valid')
         
     return traces
 
 def simulate_cell(sz, mean, cov, color, noise_mean, noise_std, trunc):
     pos = np.array(np.where(np.ones(sz[0:3])))
     var = multivariate_normal(mean=mean, cov=cov)
-    p = var.pdf(pos.T)
+    p = var.pdf(pos.T)*(2*np.pi)**(1.5)*np.linalg.det(cov)**.5
     if p.size > 1:
         p[p < np.percentile(p, trunc)] = 0
     prob = p.reshape(sz[0:3])

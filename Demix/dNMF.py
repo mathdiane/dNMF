@@ -553,19 +553,24 @@ class dNMF:
             
             
             
-    def visualize_neurons(self, file, neurons_plot, neuron_names, video, window=np.array([10,10,1]), fontsize=20):
+    def visualize_neurons(self, file, neurons_plot, neuron_names, video, window=np.array([10,10,1]), fontsize=20, gt={}, mfact=5):
         neurons = [[neurons_plot[i][j] for j in range(len(neurons_plot[0])) if neurons_plot[i][j] in neuron_names] for i in range(len(neurons_plot))]
         indices = [[neuron_names.index(neurons[i][j]) for j in range(len(neurons[0]))] for i in range(len(neurons))]
             
-        fact = 5/video.max()
+        fact = mfact/video.max()
         video = fact*video
         
-        def clean_ax(ax,add_scalebar=True):
+        min_val = -.2
+        
+        def clean_ax(ax,add_scalebar=True,clear_x=True,clear_y=True):
             
-            ax.set_yticklabels([])
-            ax.set_xticklabels([])
-            ax.set_yticks([])
-            ax.set_xticks([])
+            if clear_x:
+                ax.set_xticklabels([])
+                ax.set_xticks([])
+            if clear_y:
+                ax.set_yticklabels([])    
+                ax.set_yticks([])
+            
             ax.autoscale(False)
             
             if add_scalebar:
@@ -577,41 +582,68 @@ class dNMF:
         
         positions = self.get_positions()
         
-        fig = plt.figure(figsize=(10,(10)*(2+2*len(neurons))/len(neurons[0])),constrained_layout=True)
-        gs = fig.add_gridspec(4+4*len(neurons), 2*len(neurons[0]))
+        if 'C' not in gt.keys() and 'positions' not in gt.keys():
+            rows = 3
+        elif 'positions' not in gt.keys():
+            rows = 4
+        else:
+            rows = 5
+        
+        fig = plt.figure(figsize=(10,(10)*(2+rows*len(neurons))/len(neurons[0])),constrained_layout=True)
+        gs = fig.add_gridspec(4+2*rows*len(neurons), 3*len(neurons[0]))
+        
         ax_main = fig.add_subplot(gs[0:4, 0:int(len(neurons[0]))])
-        ax_reco = fig.add_subplot(gs[0:4, int(len(neurons[0])): ])
+        ax_reco = fig.add_subplot(gs[0:4, int(len(neurons[0])):2*int(len(neurons[0])) ])
+        ax_resi = fig.add_subplot(gs[0:4, 2*int(len(neurons[0])): ])
         
         time_text = fig.text(0.5, 1.0,'Frame = 0',horizontalalignment='center',verticalalignment='top',fontsize=fontsize)
     
         P = np.array([positions[ind,:,:].detach().numpy() for ind in indices])
         
-        im = [[None for j in range(len(neurons[0]))] for i in range(2*len(neurons))]
-        ax = [[None for j in range(len(neurons[0]))] for i in range(2*len(neurons))]
+        im = [[None for j in range(len(neurons[0]))] for i in range(rows*len(neurons))]
+        ax = [[None for j in range(len(neurons[0]))] for i in range(rows*len(neurons))]
         
         data_slice = video[:,:,:,0].max(2)[0]
-        im_main = ax_main.imshow(data_slice,vmin=0,vmax=1)
+        im_main = ax_main.imshow(data_slice,vmin=min_val,vmax=1)
         
-        s_main = ax_main.scatter(P[:,:,1,0],P[:,:,0,0],s=1,color='r',marker='x')
-        r_main = [[ax_main.text(P[i,j,1,0].flatten(), P[i,j,0,0].flatten(), neurons[i][j], color=self.pseudo_colors[indices[i][j]]) for j in range(len(neurons[0]))] for i in range(len(neurons))]
-        
-        
-        im_reco = ax_reco.imshow(data_slice,vmin=0,vmax=1)
+        s_main = ax_main.scatter(P[:,:,1,0],P[:,:,0,0],s=5,color='r',marker='x',linewidths=3)
+        r_main = [[ax_main.text(P[i,j,1,0].flatten(), P[i,j,0,0].flatten(), neurons[i][j], color=self.pseudo_colors[indices[i][j]], fontsize=10) for j in range(len(neurons[0]))] for i in range(len(neurons))]
         
         
-        ax_reco.set_title('Reconstruction',fontsize=fontsize)
+        im_reco = ax_reco.imshow(data_slice,vmin=min_val,vmax=1)
+        im_resi = ax_resi.imshow(data_slice,vmin=min_val,vmax=1)
+        
+        
+        ax_reco.set_title('',fontsize=fontsize)
         ax_main.set_title('Data',fontsize=fontsize)
+        ax_resi.set_title('Residual',fontsize=fontsize)
         
         clean_ax(ax_reco,add_scalebar=True)
         clean_ax(ax_main,add_scalebar=False)
+        clean_ax(ax_resi,add_scalebar=False)
         
-        for i in range(2*len(neurons)):
+        for i in range(rows*len(neurons)):
             for j in range(len(neurons[0])):
-                ax[i][j] = fig.add_subplot(gs[2*i+4:2*i+6,2*j:2*j+2])
-                im[i][j] = ax[i][j].imshow(np.zeros((window[0]*2+1,window[0]*2+1)),vmin=0,vmax=1)
-                ax[i][j].set_title(neurons[i//2][j],fontsize=fontsize)
+                ax[i][j] = fig.add_subplot(gs[2*i+4:2*i+6,3*j:3*j+3])
+                if i%rows == rows-1 and 'C' in gt.keys():
+                    k = indices[i//rows][j]
+                    ax[i][j].plot(self.C[k,:],linewidth=2,c=self.pseudo_colors[k,:])
+                    ax[i][j].plot(gt['C'][k,:],linewidth=2,c='k')
+                    
+#                    ax[i][j].xaxis.set_tick_params(labelsize=5)
+
+                    ax[i][j].grid('on')
+#                    if j == 0:
+#                        ax[i][j].legend(['Inferred','GT'])
+                    ax[i][j].set_xlabel('Frames $\pm$ 10')
+                    im[i][j] = ax[i][j].axvline(x=0,color='r')
+                    clean_ax(ax[i][j],add_scalebar=False)
+                else:
+                    im[i][j] = ax[i][j].imshow(np.zeros((window[0]*2+1,window[0]*2+1)),vmin=min_val,vmax=1)
+                    clean_ax(ax[i][j],add_scalebar=(i==0 and j==0))
                 
-                clean_ax(ax[i][j],add_scalebar=(i==0 and j==0))
+                if i%rows==0:
+                    ax[i][j].set_title(neurons[i//rows][j],fontsize=fontsize)
         
         Ps = torch.tensor(np.array(np.where(np.ones(video.shape[0:3]))).T).float()
         pos = torch.tensor(np.array(np.where(np.ones(2*window+1))).T).float()
@@ -620,15 +652,20 @@ class dNMF:
             if self.verbose:
                 print('Time: '+ str(t))
             
-            data_slice = video[:,:,:,t].max(2)[0]
-            im_main.set_data(data_slice)
-            s_main.set_offsets(P[:,:,[1,0],t].reshape(-1,2))
-            
-            a_k = (self.C[:,t]*torch.exp(-0.5*self.LL.detach()*dNMF.pairwise_distances(Ps*self.scale,positions[:,:,t]*self.scale))@colors)
-            data_slice = (fact*a_k.reshape((video.shape[0],video.shape[1],video.shape[2],3))).max(2)[0]
-            data_slice[data_slice < 0] = 0
-            data_slice[data_slice > 1] = 1
-            im_reco.set_data(data_slice)
+#            data_slice = video[:,:,:,t].max(2)[0]
+#            im_main.set_data(data_slice)
+#            s_main.set_offsets(P[:,:,[1,0],t].reshape(-1,2))
+#            
+#            reco_mat = self.C[:,t]*torch.exp(-0.5*self.LL.detach()*dNMF.pairwise_distances(Ps*self.scale,positions[:,:,t]*self.scale))
+#            a_k = (reco_mat@colors)
+#            reco_slice = (fact*a_k.reshape((video.shape[0],video.shape[1],video.shape[2],3))).max(2)[0]
+#            reco_slice[reco_slice < 0] = 0
+#            reco_slice[reco_slice > 1] = 1
+#            im_reco.set_data(reco_slice)
+#            
+#            
+#            resi_slice = (video[:,:,:,t]-fact*reco_mat.sum(1).reshape(video.shape[0],video.shape[1],video.shape[2])).max(2)[0]
+#            im_resi.set_data(resi_slice)
             
             for i in range(len(neurons)):
                 for j in range(len(neurons[0])):
@@ -637,18 +674,39 @@ class dNMF:
                     
             
             
-            for i in range(2*len(neurons)):
+            for i in range(rows*len(neurons)):
                 for j in range(len(neurons[0])):
-                    if i%2==0:
-                        patch = Utils.subcube(video[:,:,:,t][:,:,:,np.newaxis], P[i//2,j,:,t], window).max(2)[0].squeeze()
-                    else:
-                        k = indices[i//2][j]
+                    if i%rows==0:
+                        patch = Utils.subcube(video[:,:,:,t][:,:,:,np.newaxis], P[i//rows,j,:,t], window).max(2)[0].squeeze()
+                    elif i%rows==1:
+                        k = indices[i//rows][j]
                         a_k = (self.C[:,t]*torch.exp(-0.5*self.LL.detach()*dNMF.pairwise_distances(pos*self.scale,(positions[:,:,t] - positions[k,:,t] + torch.tensor(window).float())*self.scale))@colors)
                         patch = (fact*a_k.reshape((2*window[0]+1,2*window[1]+1,2*window[2]+1,3))).max(2)[0]
                         
                         patch[patch < 0] = 0
                         patch[patch > 1] = 1
-                    im[i][j].set_data(patch)
+                    elif i%rows==2 and 'positions' in gt.keys():
+                        k = indices[i//rows][j]
+                        a_k = (gt['C'][:,t]*torch.exp(-0.5*gt['LL']*dNMF.pairwise_distances(pos*self.scale,(gt['positions'][:,:,t] - gt['positions'][k,:,t] + torch.tensor(window).float())*self.scale))@colors)
+                        patch = (fact*a_k.reshape((2*window[0]+1,2*window[1]+1,2*window[2]+1,3))).max(2)[0]
+                        
+                        patch[patch < 0] = 0
+                        patch[patch > 1] = 1
+                    elif (rows==3 and i%rows==rows-1) or (rows>3 and i%rows==rows-2):
+                        k = indices[i//rows][j]
+                        a_k = (self.C[:,t]*torch.exp(-0.5*self.LL.detach()*dNMF.pairwise_distances(pos*self.scale,(positions[:,:,t] - positions[k,:,t] + torch.tensor(window).float())*self.scale))).sum(1)
+                        patch_r = fact*a_k.reshape((2*window[0]+1,2*window[1]+1,2*window[2]+1,1))
+                        patch_d = Utils.subcube(video[:,:,:,t][:,:,:,np.newaxis], P[i//rows,j,:,t], window)
+                        patch = (patch_d - patch_r).max(2)[0].squeeze()
+                        patch[patch < 0] = 0
+                        patch[patch > 1] = 1
+                        
+                    elif i%rows==rows-1 and 'C' in gt.keys():
+                        im[i][j].set_data([t,t],[0,1])
+                        ax[i][j].set_xlim([max(t-10,0), min(t+10,video.shape[3])])
+                    if (rows==3) or (rows>3 and i%rows!=rows-1):
+                        im[i][j].set_data(patch)
+                    
                     
             time_text.set_text('Frame = ' + str(t))
             return (im_main,)
