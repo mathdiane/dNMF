@@ -5,18 +5,15 @@ Created on Thu Apr 23 19:11:25 2020
 @author: Amin
 """
 
-# # Simulation of a Single Cell
-# This cell generates a 2D or 3D multicolor cell based on the following formula:
-# $$[\pi_1\mathcal{N}(\mu,\sigma), ..., \pi_C\mathcal{N}(\mu,\sigma)]$$
-# To test the code, uncomment the last few lines of the cell.
-
-import torch
-import numpy as np
+from .Transformations import rotation_matrix
+from scipy.stats import multivariate_normal
+from torch.distributions import normal
 from scipy.sparse import rand
 from . import Utils
-from torch.distributions import normal
-from scipy.stats import multivariate_normal
-from .Transformations import rotation_matrix
+import numpy as np
+import torch
+
+# %%
 
 def plot_trajectory(P1,P2):
     import matplotlib.pyplot as plt
@@ -54,7 +51,6 @@ def generate_quadratic_video(K,T,sz=[20,20,1],varfact=3,traj_means=[.0,.0,.0],
             patch = simulate_cell(sz.int().numpy(),positions[k,:,t].squeeze().numpy(),varfact*np.eye(3), np.array([traces[k,t]]),np.array([0]),np.array([0]),0)
             video[:,:,:,t] = video[:,:,:,t] + torch.tensor(patch).float()[:,:,:,0]
             
-#    video[video<np.percentile(video,40)] = 0
     
     return video,positions,traces
 
@@ -175,16 +171,8 @@ def get_roi_signals(video,P,window=np.array([3,3,0])):
     return signals
 
 
-# # Simulation of a Video that Contains Multiple Neurons
-# 
-# Parameters include number of neurons, random or fixed position, random or fixed orientation, size of the final video, size of the cell, covariance matrix of a cell, and noise standard deviation.
-
-# In[7]:
-
-
 
 def generate_random_video(cellnum=10, rndpos=1, rndrot=1, trunc = 60, sz=np.array([64,64,1,3,32]),                          cellsz = np.array([15,15,1,3]), cov=np.array([[7,0,0],[0,2,0],[0,0,0.000001]]), noisestd=1):
-
     
     border = sz[0:3]-cellsz[0:3]
     border[border<0]=0

@@ -2,17 +2,22 @@
 
 from matplotlib_scalebar.scalebar import ScaleBar
 import matplotlib.animation as animation
-from ..WUtils import Utils
+from scipy.ndimage import convolve
 import matplotlib.pyplot as plt
 from scipy.ndimage import zoom
 from scipy.io import savemat
 import torch.optim as optim
+from ..WUtils import Utils
 import numpy as np
 import torch
-from scipy.ndimage import convolve
 
+# %%
 
 class dNMF:
+    """Deformable Non-negative Matrix Factorization for joint tracking and 
+        demixing of microscopy videos
+        https://www.biorxiv.org/content/10.1101/2020.07.07.192120v1.abstract
+    """
     eps = 1e-32
     
     default_params = {'positions':None,

@@ -9,10 +9,8 @@ Created on Thu Apr 23 19:11:25 2020
 from scipy.ndimage import affine_transform
 import numpy as np
 import torch
- # Helper Function for Grabbing a Patch from a Multicolor Volume
-# To test, uncomment the plotting part.
 
-
+# %%
 def subcube(cube, loc_r, center):
     sz = np.array(cube.shape[0:3])
     
@@ -53,13 +51,6 @@ def subcube(cube, loc_r, center):
             
     return patch
 
-
-
-# # Helper Function for Placing a Subcube in a Cube
-# This function is used for placing the cells in the location determined by the brownian motion.
-# To test, uncomment the plotting part.
-
-
 def placement(sz, loc, F1):
     loc = np.floor(loc);
     
@@ -87,8 +78,6 @@ def placement(sz, loc, F1):
 def superpose(vol, loc, F1):
     loc = np.floor(loc).astype(int)
     sz = np.array(vol.shape)[0:3]
-    
-    
     
     center = np.floor(np.array(F1.shape[0:3])/2).astype(int)
     
@@ -125,11 +114,9 @@ def max_project(video, color_by_depth=False, cut_points=None):
                             mp[:,:,cut_points[1]+1:,:].max(2).squeeze()), axis=-1)
     else:
         mp = mp.max(2).squeeze()
-        
     
     return mp
 
-    
     
 def pairwise_distances(x,y):
     x_norm = (x**2).sum(1).view(-1, 1)
