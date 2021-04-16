@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import zoom
 from scipy.io import savemat
 import torch.optim as optim
-from ..WUtils import Utils
+from WUtils import Utils
 import numpy as np
 import torch
 
