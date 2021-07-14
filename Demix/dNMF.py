@@ -486,7 +486,7 @@ class dNMF:
     def visualize_tracks(self, file, video, labels=None, positions=None, fontsize=20):
         fig, ax = plt.subplots(figsize=(10,10))
         im = ax.imshow(video[:,:,:,0].max(2)[0].squeeze())
-        sc = ax.scatter(self.A[:,1], self.A[:,0],marker='x',color=self.pseudo_colors)
+        sc = ax.scatter(self.A[:,1], self.A[:,0],marker='x',color=self.pseudo_colors.cpu().numpy())
         
         time_text = fig.text(0.5, 0.03,'Frame = 0',horizontalalignment='center',verticalalignment='top',fontsize=fontsize)
         
@@ -499,7 +499,7 @@ class dNMF:
         if labels is not None:
             annot = []
             for i, txt in enumerate(labels):
-                annot.append(ax.text(self.A[i,1], self.A[i,0],txt,color=self.pseudo_colors[i,:],fontsize=8))
+                annot.append(ax.text(self.A[i,1], self.A[i,0],txt,color=self.pseudo_colors.cpu().numpy()[i,:],fontsize=8))
 
         def init():
             im.set_data(video[:,:,:,0].max(2)[0].squeeze())
@@ -549,7 +549,7 @@ class dNMF:
             avg = avg/positions.shape[2]
             plt.imshow(avg,vmin=0,vmax=1)
             plt.axis('off')
-            plt.scatter(window[1],window[0],color=self.pseudo_colors[idx])
+            plt.scatter(window[1],window[0],color=self.pseudo_colors.cpu().numpy()[idx])
             scalebar = ScaleBar(self.scale[0],'um')
             plt.gca().add_artist(scalebar)
             plt.title(neurons[i])
@@ -612,7 +612,7 @@ class dNMF:
         im_main = ax_main.imshow(data_slice,vmin=min_val,vmax=1)
         
         s_main = ax_main.scatter(P[:,:,1,0],P[:,:,0,0],s=5,color='r',marker='x',linewidths=3)
-        r_main = [[ax_main.text(P[i,j,1,0].flatten(), P[i,j,0,0].flatten(), neurons[i][j], color=self.pseudo_colors[indices[i][j]], fontsize=10) for j in range(len(neurons[0]))] for i in range(len(neurons))]
+        r_main = [[ax_main.text(P[i,j,1,0].flatten(), P[i,j,0,0].flatten(), neurons[i][j], color=self.pseudo_colors.cpu().numpy()[indices[i][j]], fontsize=10) for j in range(len(neurons[0]))] for i in range(len(neurons))]
         
         
         im_reco = ax_reco.imshow(data_slice,vmin=min_val,vmax=1)
