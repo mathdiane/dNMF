@@ -5,54 +5,43 @@ Created on Thu Apr 23 19:11:25 2020
 @author: Amin
 """
 
-from .Transformations import rotation_matrix
 from scipy.stats import multivariate_normal
 from torch.distributions import normal
 from scipy.sparse import rand
 from . import Utils
 import numpy as np
 import torch
+import math
 
 # %%
 
-def plot_trajectory(P1,P2):
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(20,20))
-    K = P1.shape[0]
-    colors = torch.rand(K,3).numpy()
-    for k in range(K):
-        pos = P1[k,:,:].squeeze()
-        plt.scatter(pos[0,0],pos[1,0],c=colors[k,:])
-        plt.plot(pos[0,:], pos[1,:],c=colors[k,:])
-
-        pos = P2[k,:,:].squeeze()
-        plt.scatter(pos[0,0],pos[1,0],c=colors[k,:],marker='x')
-        plt.plot(pos[0,:], pos[1,:],c=colors[k,:],linestyle='--')
-
-    plt.grid()
-    plt.show()
-
-
-def generate_quadratic_video(K,T,sz=[20,20,1],varfact=3,traj_means=[.0,.0,.0],
-                             traj_variances=[1e-3,1e-3,1e-5],density=.1,bg_noise=.005,traces='exp'):
-    positions = simulate_quadratic_sequential_trajectory(K,T,traj_means,traj_variances,sz)
+def generate_quadratic_video(K,T,sz=[20,20,1],shape_std=3,traj_means=[.0,.0,.0],
+                             traj_snr=[-3,-3,-3],density=.1,bg_snr=-1,traces='exp'):
+    """Simulate a video of active and moving neurons using Gaussian shapes
+        and quadratic transofrmation for motion trajectories
+    """
+    
+    positions = simulate_quadratic_sequential_trajectory(K,T,traj_means,traj_snr,sz)
     
     if traces == 'exp':
         traces = simulate_exponential_traces(K,T,density)
     elif traces == 'mixed':
         traces = simulate_mixed_traces(K,T,density)
-        
-    sz = torch.tensor([positions[:,0,:].max()+4, positions[:,1,:].max()+4, positions[:,2,:].max()+1, T])
-    video = bg_noise*normal.Normal(0,1).sample(sz.int())
     
-    sz[3]=1
+    sz = np.array([sz[0],sz[1],sz[2],T])
+    
+    bg_std = np.sqrt(10**(bg_snr/10)) # video is normalized to have power = 1
+    video = torch.zeros([sz_ for sz_ in sz])
+    noise_video = bg_std*normal.Normal(0,1).sample(sz)
+    sz[3] = 1
     for t in range(T):
         for k in range(K):
-            patch = simulate_cell(sz.int().numpy(),positions[k,:,t].squeeze().numpy(),varfact*np.eye(3), np.array([traces[k,t]]),np.array([0]),np.array([0]),0)
+            patch = simulate_cell(sz,positions[k,:,t].squeeze().numpy(),shape_std*np.eye(3), np.array([traces[k,t]]),np.array([0]),np.array([0]),0)
             video[:,:,:,t] = video[:,:,:,t] + torch.tensor(patch).float()[:,:,:,0]
-            
+    video /= (video**2).sum()
+    video += noise_video
     
-    return video,positions,traces
+    return video/video.max(),positions,traces
 
 
 def quadratic_basis(I):
@@ -60,18 +49,19 @@ def quadratic_basis(I):
                      (I[:,0]*I[:,2]).unsqueeze(1),(I[:,1]*I[:,2]).unsqueeze(1)),1)
     return I_p
 
-def simulate_quadratic_sequential_trajectory(K,T,means=[.0,.0,.0],variances=[.001,.001,.00001],sz=[20,20,1]):
+def simulate_quadratic_sequential_trajectory(K,T,means=[.0,.0,.0],snr=[-2,-2,-2],sz=[20,20,1]):
     B0 = torch.tensor([[means[0],1,0,0,0,0,0,0,0,0], \
                        [means[1],0,1,0,0,0,0,0,0,0], \
                        [means[2],0,0,1,0,0,0,0,0,0]]).t().float()
-         
+        
+    std = [np.sqrt(10**(snr[i]/10))*(sz[i]) for i in range(len(snr))]
     a = normal.Normal(0,1).sample((T,3,10))
-    b = torch.tensor([variances]).t()*a.permute([1,0,2]).permute([2,0,1])
+    b = torch.tensor([std]).t()*a.permute([1,0,2]).permute([2,0,1])
     
     betas = B0[:,:,np.newaxis] + b
     sz = torch.tensor(sz).float()
-    I = (sz-1)*torch.rand(K,3)
-    I[:,[0,1]] = I[:,[0,1]] + 4
+    I = ((sz-1)/2)*torch.rand(K,3)
+    I += (sz-1)/4
     
     positions = torch.zeros(K,3,T)
     positions[:,:,0] = I
@@ -142,6 +132,7 @@ def simulate_cell(sz, mean, cov, color, noise_mean, noise_std, trunc):
     
     for channel in range(sz[3]):
         volume[:, :, :, channel] = color[channel]*prob + noise_mean[channel] + noise_std[channel]*np.random.randn(*sz[0:3])
+        
     return volume
 
 
@@ -231,3 +222,48 @@ def compute_snr_motion(stds=[1e-3,1e-3,1e-5]):
 
 def compute_snr_positions(positions):
     return np.log((positions[:,:,0]**2).sum()) - np.log(np.array([((positions[:,:,t] - positions[:,:,0])**2).sum() for t in range(1,positions.shape[2])]).mean())
+    
+def rotation_matrix(angle, direction, point=None):
+    """Return matrix to rotate about axis defined by point and direction.
+        Taken from https://github.com/cgohlke/transformations
+    """
+    sina = math.sin(angle)
+    cosa = math.cos(angle)
+    direction = unit_vector(direction[:3])
+    # rotation matrix around unit vector
+    R = np.diag([cosa, cosa, cosa])
+    R += np.outer(direction, direction) * (1.0 - cosa)
+    direction *= sina
+    R += np.array([[ 0.0,         -direction[2],  direction[1]],
+                      [ direction[2], 0.0,          -direction[0]],
+                      [-direction[1], direction[0],  0.0]])
+    M = np.identity(4)
+    M[:3, :3] = R
+    if point is not None:
+        # rotation not around origin
+        point = np.array(point[:3], dtype=np.float64, copy=False)
+        M[:3, 3] = point - np.dot(R, point)
+    return M
+
+def unit_vector(data, axis=None, out=None):
+    """Return ndarray normalized by length, i.e. Euclidean norm, along axis.
+        Taken from https://github.com/cgohlke/transformations
+    """
+    if out is None:
+        data = np.array(data, dtype=np.float64, copy=True)
+        if data.ndim == 1:
+            data /= math.sqrt(np.dot(data, data))
+            return data
+    else:
+        if out is not data:
+            out[:] = np.array(data, copy=False)
+        data = out
+    length = np.atleast_1d(np.sum(data * data, axis))
+    np.sqrt(length, length)
+    if axis is not None:
+        length = np.expand_dims(length, axis)
+    data /= length
+    if out is None:
+        return data
+    return None
+

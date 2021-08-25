@@ -1,75 +1,59 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Apr 23 19:10:26 2020
+Created on Wed Aug 11 22:10:11 2021
 
 @author: Amin
 """
-from Demix.MotionCorrect import MotionCorrect
-from WUtils import Simulator
-from Demix.dNMF import dNMF
+
+from Demix.dNMF import DeformableNMF, ExponentialFP, SimulatedVideoDataset
+from torch.utils.data import DataLoader
+import torch.optim as optim
+import visualization as V
 import numpy as np
 import torch
-import time
 
-# %% Choosing the parameters
-params = {'n_trials':5, 'noise_level':1e-4, 'sigma_inv':.2, 
-          'radius':10, 'step_S':.1, 'gamma':0, 'stride_factor':2, 'density':.1, 'varfact':5,
-          'traj_means':[.0,.0,.0], 'traj_variances':[2e-4,2e-4,1e-5], 'sz':[20,20,1], 
-          'K':20, 'T':20, 'roi_window':[4,4,0]}
+# %% Simulation
+K = 6
+T = 40
+times = np.arange(3)
+sz = torch.tensor([50,50,2])
+C = torch.rand(K,T)
 
-# %% Simulating video
-video,positions,traces = Simulator.generate_quadratic_video(K=params['K'],T=params['T'],sz=params['sz'],\
-                                                varfact=params['varfact'],traj_variances=params['traj_variances'],\
-                                                traj_means=params['traj_means'],density=params['density'],bg_noise=params['noise_level'])
-neuron_names = [str(i) for i in range(positions.shape[0])]
-
-# %% Running ROI using ground truth tracking
-start = time.time()
-roi_signals = Simulator.get_roi_signals(video,positions,window=np.array(params['roi_window']))
-end = time.time()
-print('ROI finished in ' + str(end-start) + ' seconds')
+efp = ExponentialFP(sz,K,T,positions=None)
+A_tC,A_t,grid,reg = efp(times,C)
 
 
-# %% Running normcorre motion correction
-start = time.time()
-shape = video.shape[:3]
+dataset = SimulatedVideoDataset(K=K,T=T,sz=sz,shape_std=3,traj_snr=[-100,-100,-100],
+                                traj_means=[0,0,0],density=.9,bg_snr=-130)
 
-strides = (shape[0]//params['stride_factor']+1,shape[1]//params['stride_factor']+1,shape[2]//params['stride_factor']+1)
-overlaps = (shape[0]//(2*params['stride_factor'])+1,shape[1]//(2*params['stride_factor'])+1,shape[2]//(2*params['stride_factor'])+1)
-max_shifts = (shape[0]//params['stride_factor']+1,shape[1]//params['stride_factor']+1,shape[2]//params['stride_factor']+1)
+batch_size = 4
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+
+V.visualize_image(dataset.video[:,:,:,0].max(2)[0])
+V.visualize_trajectory(dataset.positions,dataset.positions)
+
+# %%
+dnmf = DeformableNMF(sz,K,T,positions=dataset.positions[:,:,0])
+optimizer = optim.Adam([dnmf.fp.beta], lr=1e-5)
+
+for i in range(20):
+    dnmf.update_motion(dataloader,optimizer,gamma=1,epochs=10)
+    A_t,Y_i,Y = dnmf.update_footprints(dataloader,batch_size,sz,gamma_c=0,iter_c=10)
 
 
+# %%
+Y = Y.max(2)
+Y_i = Y_i.max(2)
+A_t = A_t.max(2)
 
-data = video.numpy().transpose([3,0,1,2])
-m = MotionCorrect(data,strides=strides,
-                  overlaps=overlaps,max_shifts=max_shifts,
-                  pw_rigid=True,is3D=True,border_nan='copy')
+# %%
+file = ''
+save = True
 
-m.motion_correct()
-A = m.apply_shifts_frame(data,positions[:,:,0].numpy(),1)
-A = torch.tensor(A).float()
+V.visualize_temporal(dnmf.C.cpu().numpy(),titlestr='C',save=save,file=file+'temporal')
+V.visualize_spatial(dnmf.fp.A.cpu().numpy().max(2),RGB=save,save=save,file=file+'spatial-'+str(i))
 
-# %% Running NMF on motion corrected data
-n_nmf = dNMF(torch.tensor(m.mc[0]).float(),params={'positions':A[:,:,np.newaxis],\
-            'radius':params['radius'],'step_S':params['step_S'],'gamma':params['gamma'],
-            'use_gpu':False,'initial_p':A,'sigma_inv':params['sigma_inv'],
-            'method':'1->t', 'verbose':True})
-n_nmf.optimize(lr=.1,n_iter=0,n_iter_c=20)
-end = time.time()
-print('normcorre-nmf finished in ' + str(end-start) + ' seconds')
-
-# %% Running dNMF
-start = time.time()
-dnmf = dNMF(video,params={'positions':positions[:,:,0][:,:,np.newaxis],\
-    'radius':params['radius'],'step_S':params['step_S'],'gamma':params['gamma'],
-    'use_gpu':False,'initial_p':positions[:,:,0],'sigma_inv':params['sigma_inv'],
-    'method':'1->t', 'verbose':True})
-
-dnmf.optimize(lr=1e-4,n_iter=20,n_iter_c=2)
-end = time.time()
-print('dNMF finished in ' + str(end-start) + ' seconds')
-
-# %% Visualizing dNMF results
-dnmf.visualize_tracks('result',video)
-dnmf.visualize_stats('result')
-dnmf.visualize_neurons('result', [['0','1','2']], neuron_names, video)
+V.visualize_video(video=Y[:,:,None,:]/Y.max(),save=save,file=file+'original.mp4')
+V.visualize_video(video=Y_i[:,:,None,:]/Y_i.max(),save=save,file=file+'registered.mp4')
+V.visualize_video(video=A_t[:,:,0,:][:,:,None,:]/A_t.max(),save=save,file=file+'pf-sample.mp4')
+V.visualize_video(video=(Y-Y_i)[:,:,None,:]/(Y-Y_i).max(),save=save,file=file+'motion-resid.mp4')
