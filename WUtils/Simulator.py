@@ -19,10 +19,42 @@ def generate_quadratic_video(K,T,sz=[20,20,1],shape_std=3,traj_means=[.0,.0,.0],
                              traj_snr=[-3,-3,-3],density=.1,bg_snr=-1,traces='exp'):
     """Simulate a video of active and moving neurons using Gaussian shapes
         and quadratic transofrmation for motion trajectories
+        
+        Args:
+            K (integer): Number of neurons
+            T (integer): Number of time points
+            sz (list): Size of the simulated video
+            shape_std (float): Standard deviation of the neuron's spherical 
+                covariance which determines how big the neurons are
+            traj_means (list): Mean of the motion trajectory in x,y,z 
+                dimensions (measured in pixels), if nonzero then there will 
+                be a constant shift in neurons motion trajectory along 
+                specified dimensions (used as the constant term in the 
+                quadratic transformation used for generating motion)
+            traj_snr (list): The signal to noise ratio of the motion trajectory
+                noise in dB (added as white noise to the quadratic 
+                 transformation used for generating motion)
+            density (float): Density of the spikes in the generated neural 
+                activity traces
+            bg_snr (float): Signal to noise ratio (in dB) of the video 
+                background noise
+            traces (string):'exp' corresponds to exponentially decaying signals
+                and 'mixed' corresponds to a mixture of Gaussian noise and 
+                exponentially decaying signals
+                
+        Returns:
+            video (numpy.ndarray): The resulting generated video wish shape
+                [sz[0] sz[1] sz[2] T]
+            positions (numpy.ndarray): Ground truth positions of the simulated
+                neurons in time, shape is [K 3 T]
+            traces (numpy.ndarray): Ground truth simulated traces, shape is
+                [K T]
     """
-    
+    # Generate motion trajectory by sequentially transforming point clouds from
+    # one time point to the next
     positions = simulate_quadratic_sequential_trajectory(K,T,traj_means,traj_snr,sz)
     
+    # Generate traces
     if traces == 'exp':
         traces = simulate_exponential_traces(K,T,density)
     elif traces == 'mixed':
@@ -30,6 +62,7 @@ def generate_quadratic_video(K,T,sz=[20,20,1],shape_std=3,traj_means=[.0,.0,.0],
     
     sz = np.array([sz[0],sz[1],sz[2],T])
     
+    # Generate video based on the traces, positions, and other features
     bg_std = np.sqrt(10**(bg_snr/10)) # video is normalized to have power = 1
     video = torch.zeros([sz_ for sz_ in sz])
     noise_video = bg_std*normal.Normal(0,1).sample(sz)
@@ -45,11 +78,39 @@ def generate_quadratic_video(K,T,sz=[20,20,1],shape_std=3,traj_means=[.0,.0,.0],
 
 
 def quadratic_basis(I):
+    """Generate Nx10 quadratic basis from a Nx3 position array
+    
+    Args:
+        I (numpy.ndarray): Nx3 positions array to be transferred to quadratic
+            representation
+    
+    Returns:
+        I_p (numpy.ndarray): Nx10 quadratic basis representation
+            (1,x,y,z,x*2,x*y,x*z,y*z)
+    """
+    
     I_p = torch.cat((torch.ones((len(I),1)),I,I*I,(I[:,0]*I[:,1]).unsqueeze(1), \
                      (I[:,0]*I[:,2]).unsqueeze(1),(I[:,1]*I[:,2]).unsqueeze(1)),1)
     return I_p
 
 def simulate_quadratic_sequential_trajectory(K,T,means=[.0,.0,.0],snr=[-2,-2,-2],sz=[20,20,1]):
+    """Generate point cloud motion trajectory sequentially using quadratic 
+        transformation of each frame to the next
+        
+    Args:
+        K (integer): Number of neurons
+        T (integer): Number of time points
+        sz (list): Size of the simulated video
+        means (list): Mean of the motion trajectory in x,y,z 
+            dimensions (measured in pixels), if nonzero then there will 
+            be a constant shift in neurons motion trajectory along 
+            specified dimensions (used as the constant term in the 
+            quadratic transformation used for generating motion)
+        snr (list): The signal to noise ratio of the motion trajectory
+            noise in dB (added as white noise to the quadratic 
+             transformation used for generating motion)
+    """
+    
     B0 = torch.tensor([[means[0],1,0,0,0,0,0,0,0,0], \
                        [means[1],0,1,0,0,0,0,0,0,0], \
                        [means[2],0,0,1,0,0,0,0,0,0]]).t().float()
@@ -71,13 +132,26 @@ def simulate_quadratic_sequential_trajectory(K,T,means=[.0,.0,.0],snr=[-2,-2,-2]
         
     return positions
 
-def simulate_quadratic_trajectory(K,T,variances=[.001,.001,.00001],sz=[20,20,1]):
+def simulate_quadratic_trajectory(K,T,snr=[-2,-2,-2],sz=[20,20,1]):
+    """Generate point cloud motion trajectory using quadratic transformation 
+        of the first frame to the t-th frame
+        
+    Args:
+        K (integer): Number of neurons
+        T (integer): Number of time points
+        sz (list): Size of the simulated video
+        snr (list): The signal to noise ratio of the motion trajectory
+            noise in dB (added as white noise to the quadratic 
+             transformation used for generating motion)
+    """
+    
     B0 = torch.tensor([[0,1,0,0,0,0,0,0,0,0], \
                        [0,0,1,0,0,0,0,0,0,0], \
                        [0,0,0,1,0,0,0,0,0,0]]).t().float()
-         
+        
+    std = [np.sqrt(10**(snr[i]/10))*(sz[i]) for i in range(len(snr))]
     a = torch.cumsum(normal.Normal(0,1).sample((T,3,10)),0)
-    b = torch.tensor([variances]).t()*a.permute([1,0,2]).permute([2,0,1])
+    b = torch.tensor([std]).t()*a.permute([1,0,2]).permute([2,0,1])
     
     betas = B0[:,:,np.newaxis] + b
     sz = torch.tensor(sz).float()
@@ -93,6 +167,19 @@ def simulate_quadratic_trajectory(K,T,variances=[.001,.001,.00001],sz=[20,20,1])
     return positions
 
 def simulate_mixed_traces(K,T,density=.1,b=1):
+    """Generate traces for neural activities based on a mixture of white noise
+        and exponentially decaying signals
+        
+        Args:
+            K (integer): Number of neurons
+            T (integer): Number of time points
+            density (float): Density of the spikes in the generated neural 
+                activity traces
+            b (float): Baseline activity 
+        Returns:
+            traces (numpy.ndarray): Simulated traces, shape is [K T]
+    """
+    
     traces = b*np.ones((K,T))
     kernel = np.exp(np.arange(0,-3,-.3))
     for k in range(K):
@@ -111,6 +198,18 @@ def simulate_mixed_traces(K,T,density=.1,b=1):
     return traces
         
 def simulate_exponential_traces(K,T,density=.1):
+    """Generate traces for neural activities based on exponentially decaying 
+        signals
+        
+        Args:
+            K (integer): Number of neurons
+            T (integer): Number of time points
+            density (float): Density of the spikes in the generated neural 
+                activity traces
+        Returns:
+            traces (numpy.ndarray): Simulated traces, shape is [K T]
+    """
+    
     traces = np.random.rand(K,T)
     
     kernel = np.exp(np.arange(0,-3,-.3))
@@ -122,6 +221,9 @@ def simulate_exponential_traces(K,T,density=.1):
     return traces
 
 def simulate_cell(sz, mean, cov, color, noise_mean, noise_std, trunc):
+    """Simulate the image of one cell in 3 dimensions
+    """
+    
     pos = np.array(np.where(np.ones(sz[0:3])))
     var = multivariate_normal(mean=mean, cov=cov)
     p = var.pdf(pos.T)*(2*np.pi)**(1.5)*np.linalg.det(cov)**.5
@@ -134,7 +236,6 @@ def simulate_cell(sz, mean, cov, color, noise_mean, noise_std, trunc):
         volume[:, :, :, channel] = color[channel]*prob + noise_mean[channel] + noise_std[channel]*np.random.randn(*sz[0:3])
         
     return volume
-
 
 
 def simulate_trajectory(t, obj, mean, cov):
@@ -153,6 +254,9 @@ def simulate_trajectory(t, obj, mean, cov):
 
 
 def get_roi_signals(video,P,window=np.array([3,3,0])):
+    """Extract cell signals by averaging pixels in a cube
+    """
+    
     signals = np.zeros((P.shape[0],P.shape[2]))
     for t in range(P.shape[2]):
         for k in range(P.shape[0]):
@@ -164,6 +268,8 @@ def get_roi_signals(video,P,window=np.array([3,3,0])):
 
 
 def generate_random_video(cellnum=10, rndpos=1, rndrot=1, trunc = 60, sz=np.array([64,64,1,3,32]),                          cellsz = np.array([15,15,1,3]), cov=np.array([[7,0,0],[0,2,0],[0,0,0.000001]]), noisestd=1):
+    """Generate video of randomly moving cells based on affine transformation
+    """
     
     border = sz[0:3]-cellsz[0:3]
     border[border<0]=0
@@ -182,7 +288,7 @@ def generate_random_video(cellnum=10, rndpos=1, rndrot=1, trunc = 60, sz=np.arra
     center = (cellsz[0:3]/2).astype(int);
     
     rotsig = 0.01
-    from scipy.stats import multivariate_normal
+    
     if rndrot:
         var = multivariate_normal(mean=np.array([0,0,0]), cov=[[.01,0,0],[0,.01,0],[0,0,0.01]])
         rotrnd = np.cumsum(var.rvs(size=(sz[4],cellnum)), axis=0)
@@ -205,6 +311,10 @@ def generate_random_video(cellnum=10, rndpos=1, rndrot=1, trunc = 60, sz=np.arra
     return video, trajectory, rotrnd, colors, cellnum, cellsz, sz, trunc, cov, rotsig
 
 def compute_snr_intensity(density,cov=2*np.eye(3),T=20,bg_std=.0001):
+    """Computing the SNR of cell activities based on noise covariance (used
+        for the previous version of the bioRxiv paper)
+    """
+    
     maxC = np.array([simulate_exponential_traces(1,T,density).max() for i in range(10)]).mean()
     center = (np.sqrt(np.linalg.eigvals(cov))*3).astype(int)
     sz = (center*2).tolist()
@@ -214,6 +324,10 @@ def compute_snr_intensity(density,cov=2*np.eye(3),T=20,bg_std=.0001):
     return SNR
 
 def compute_snr_motion(stds=[1e-3,1e-3,1e-5]):
+    """Computing the SNR of cell activities based on noise stds (used
+        for the previous version of the bioRxiv paper)
+    """
+    
     B0 = np.array([[0,1,0,0,0,0,0,0,0,0],
                    [0,0,1,0,0,0,0,0,0,0],
                    [0,0,0,1,0,0,0,0,0,0]])
@@ -221,6 +335,10 @@ def compute_snr_motion(stds=[1e-3,1e-3,1e-5]):
     return SNR
 
 def compute_snr_positions(positions):
+    """Computing the SNR of neural positions (used for the previous 
+        version of the bioRxiv paper)
+    """
+    
     return np.log((positions[:,:,0]**2).sum()) - np.log(np.array([((positions[:,:,t] - positions[:,:,0])**2).sum() for t in range(1,positions.shape[2])]).mean())
     
 def rotation_matrix(angle, direction, point=None):
