@@ -16,7 +16,7 @@ import torch
 device = 'cuda'
 
 class ExponentialFP(nn.Module):
-    def __init__(self,sz,K,T,positions=None):
+    def __init__(self,sz,K,T,positions=None,shape_std=3):
         super().__init__()
         
         flow_id = torch.cat(torch.where(torch.ones(list(sz)))).reshape([3]+list(sz)).permute([1,2,3,0]).float().to(device)
@@ -26,7 +26,7 @@ class ExponentialFP(nn.Module):
                           torch.zeros(6,3)),0)[:,:,None].repeat(1,1,T).to(device)
         self.beta.requires_grad=True
         
-        self.sigma = (torch.ones(K)*3).to(device)
+        self.sigma = (torch.ones(K)*shape_std).to(device)
         if positions is None:
             self.pos = (1+torch.rand(K,3)*sz[None,:]).to(device)
         else:
@@ -194,12 +194,11 @@ class DeformableNMF:
                     print('Reg: ' + str(reg))
 
 class SimulatedVideoDataset(Dataset):
-    def __init__(self,K=20,T=30,sz=[100,100,5],shape_std=9,traj_means=[0,0,0],
-                 traj_snr=[-2,-2,-2],density=.9,bg_snr=-2):
+    def __init__(self,K,T,sz,shape_std,density,bg_snr,traces,motion,motion_par):
         """
         """
-        video,positions,traces = Simulator.generate_quadratic_video(K=K,T=T,sz=sz,shape_std=shape_std,
-                    traj_means=traj_means,traj_snr=traj_snr,density=density,bg_snr=bg_snr)
+        video,positions,traces = Simulator.generate_video(K,T,sz,shape_std
+                                          ,density,bg_snr,traces,motion,motion_par)
 
         self.video = video.float()
         self.positions = positions

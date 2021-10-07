@@ -5,6 +5,8 @@ Created on Thu Apr 23 19:11:25 2020
 @author: Amin
 """
 
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF
 from scipy.stats import multivariate_normal
 from torch.distributions import normal
 from scipy.sparse import rand
@@ -15,10 +17,11 @@ import math
 
 # %%
 
-def generate_quadratic_video(K,T,sz=[20,20,1],shape_std=3,traj_means=[.0,.0,.0],
-                             traj_snr=[-3,-3,-3],density=.1,bg_snr=-1,traces='exp'):
+def generate_video(K,T,sz=[20,20,1],shape_std=3,density=.1,bg_snr=-1,traces='exp',
+                    motion='sq',motion_par={'means':[.0,.0,.0],'snr':[-3,-3,-3]}):
+    
     """Simulate a video of active and moving neurons using Gaussian shapes
-        and quadratic transofrmation for motion trajectories
+        and various motion trajectory models
         
         Args:
             K (integer): Number of neurons
@@ -26,21 +29,15 @@ def generate_quadratic_video(K,T,sz=[20,20,1],shape_std=3,traj_means=[.0,.0,.0],
             sz (list): Size of the simulated video
             shape_std (float): Standard deviation of the neuron's spherical 
                 covariance which determines how big the neurons are
-            traj_means (list): Mean of the motion trajectory in x,y,z 
-                dimensions (measured in pixels), if nonzero then there will 
-                be a constant shift in neurons motion trajectory along 
-                specified dimensions (used as the constant term in the 
-                quadratic transformation used for generating motion)
-            traj_snr (list): The signal to noise ratio of the motion trajectory
-                noise in dB (added as white noise to the quadratic 
-                 transformation used for generating motion)
+            motion (string): Motion model, choose between 'sq'=sequential 
+                quadratic, 'q'=independent quadratic, and 'gp'=gaussian process
+            motion_par (dict): Parameters of motion (refer to each motion
+                 generators to find corresponding parameters)
             density (float): Density of the spikes in the generated neural 
                 activity traces
             bg_snr (float): Signal to noise ratio (in dB) of the video 
                 background noise
             traces (string):'exp' corresponds to exponentially decaying signals
-                and 'mixed' corresponds to a mixture of Gaussian noise and 
-                exponentially decaying signals
                 
         Returns:
             video (numpy.ndarray): The resulting generated video wish shape
@@ -52,13 +49,16 @@ def generate_quadratic_video(K,T,sz=[20,20,1],shape_std=3,traj_means=[.0,.0,.0],
     """
     # Generate motion trajectory by sequentially transforming point clouds from
     # one time point to the next
-    positions = simulate_quadratic_sequential_trajectory(K,T,traj_means,traj_snr,sz)
-    
+    if motion == 'qs': # Quadratic Sequential
+        positions = simulate_quadratic_sequential_trajectory(K,T,motion_par['means'],motion_par['snr'],sz)
+    if motion == 'q': # Quadratic
+        positions = simulate_quadratic_trajectory(K,T,motion_par['means'],motion_par['snr'],sz)
+    if motion == 'gp': # Gaussian Process
+        positions = generate_gp_motion(K,T,motion_par['sigma'],motion_par['ls'],sz)
+        
     # Generate traces
     if traces == 'exp':
         traces = simulate_exponential_traces(K,T,density)
-    elif traces == 'mixed':
-        traces = simulate_mixed_traces(K,T,density)
     
     sz = np.array([sz[0],sz[1],sz[2],T])
     
@@ -109,6 +109,10 @@ def simulate_quadratic_sequential_trajectory(K,T,means=[.0,.0,.0],snr=[-2,-2,-2]
         snr (list): The signal to noise ratio of the motion trajectory
             noise in dB (added as white noise to the quadratic 
              transformation used for generating motion)
+    
+    Returns:
+        positions (numpy.ndarray): Positions of the simulated neurons in time, 
+            shape is [K 3 T]
     """
     
     B0 = torch.tensor([[means[0],1,0,0,0,0,0,0,0,0], \
@@ -166,38 +170,8 @@ def simulate_quadratic_trajectory(K,T,snr=[-2,-2,-2],sz=[20,20,1]):
         
     return positions
 
-def simulate_mixed_traces(K,T,density=.1,b=1):
-    """Generate traces for neural activities based on a mixture of white noise
-        and exponentially decaying signals
         
-        Args:
-            K (integer): Number of neurons
-            T (integer): Number of time points
-            density (float): Density of the spikes in the generated neural 
-                activity traces
-            b (float): Baseline activity 
-        Returns:
-            traces (numpy.ndarray): Simulated traces, shape is [K T]
-    """
-    
-    traces = b*np.ones((K,T))
-    kernel = np.exp(np.arange(0,-3,-.3))
-    for k in range(K):
-        
-        start = int(k*(T/K))
-        if k == K-1:
-            end = int((k+1)*(T/K))
-        else:
-            end = int((k+1)*(T/K))+10
-        
-        a = rand(1, end-start, density=density, format='csr')
-        a.data[:] = 1
-        traces[k,start:end] = traces[k,start:end] + np.convolve(np.array(a.todense()).flatten(), kernel, 'same')
-        
-        
-    return traces
-        
-def simulate_exponential_traces(K,T,density=.1):
+def simulate_exponential_traces(K,T,density=.1,b=1):
     """Generate traces for neural activities based on exponentially decaying 
         signals
         
@@ -210,13 +184,13 @@ def simulate_exponential_traces(K,T,density=.1):
             traces (numpy.ndarray): Simulated traces, shape is [K T]
     """
     
-    traces = np.random.rand(K,T)
+    traces = b+0*np.random.rand(K,T)
     
     kernel = np.exp(np.arange(0,-3,-.3))
     for k in range(K):
         a = rand(1, T+len(kernel)-1, density=density, format='csr')
         a.data[:] = 1
-        traces[k,:] = np.convolve(np.array(a.todense()).flatten(), kernel, 'valid')
+        traces[k,:] += np.convolve(np.array(a.todense()).flatten(), kernel, 'valid')
         
     return traces
 
@@ -385,3 +359,34 @@ def unit_vector(data, axis=None, out=None):
         return data
     return None
 
+def generate_gp_motion(K,T=100,sigma=[10,10,10],ls=[10,10,10],sz=[10,10,1]):
+    """Generate motion trajectories based on Gaussian Process and RBF kernels
+    
+    Args:
+        K (integer): Number of neurons
+        T (integer): Number of time points
+        sz (list): Size of the simulated video
+        sigma (list): Controls the amount of motion in each direction
+        ls (list): Length scale, used to determine the coherency of motion in
+            different directions 
+    
+    Returns:
+        positions (numpy.ndarray): Positions of the simulated neurons in time, 
+            shape is [K 3 T]
+    """
+    
+    A = np.random.rand(K,3)*np.array(sz)
+    
+    kernels = [sigma[0]*RBF(ls[0]),
+               sigma[1]*RBF(ls[1]),
+               sigma[2]*RBF(ls[2])]
+    
+    
+    gps = [[]]*3
+    for d in range(3):
+        gps[d] = GaussianProcessRegressor(kernel=kernels[d], n_restarts_optimizer=9)
+        gps[d].predict(A[:,d][:,None])
+    
+    S = np.array([A[:,d][:,None]+gps[d].sample_y(A[:,d][:,None],n_samples=T).squeeze().copy() for d in range(3)]).T 
+    return torch.tensor(S.transpose(1,2,0)).float()
+    
