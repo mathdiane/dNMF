@@ -8,6 +8,10 @@ from matplotlib_scalebar.scalebar import ScaleBar
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes._axes import _log as matplotlib_axes_logger
+matplotlib_axes_logger.setLevel('ERROR')
+#suppress the warning: *c* argument looks like a single numeric RGB or RGBA sequence, which should be avoided as value-mapping will have precedence in case its length matches with *x* & *y*.  Please use the *color* keyword-argument or provide a 2-D array with a single row if you intend to specify the same RGB or RGBA value for all points.
+#when running visualize_trajectory fx
 
 # %%
 
@@ -147,24 +151,40 @@ def visualize_spatial(A,save=False,file=None,RGB=True):
     else:
         plt.show()
         
-def visualize_trajectory(P1,P2,save=False,file=None):
+def visualize_trajectory(P1,P2,save=False,file=None,flip_axis=True):
+  #Input:
+  #flip_axis: to flip the axis for plotting such that the dimension matches the video dimensions
+    print("flip_axis=",flip_axis)
     plt.figure(figsize=(10,10))
     
     colors = plt.cm.hsv(np.linspace(0,1,P1.shape[0]+1)[0:-1])[:,0:3]
     for k in range(P1.shape[0]):
+      color_k = colors[k,:]
+      if flip_axis==True:
         pos = P1[k,:,:].squeeze()
-        plt.scatter(pos[0,0],pos[1,0],c=colors[k,:])
-        plt.plot(pos[0,:], pos[1,:],c=colors[k,:])
+        plt.scatter(pos[1,0],pos[0,0],c=color_k)
+        plt.plot(pos[1,:], pos[0,:],c=color_k)
 
         pos = P2[k,:,:].squeeze()
-        plt.scatter(pos[0,0],pos[1,0],c=colors[k,:],marker='x')
-        plt.plot(pos[0,:], pos[1,:],c=colors[k,:],linestyle='--')
+        plt.scatter(pos[1,0],pos[0,0],c=color_k,marker='x')
+        plt.plot(pos[1,:], pos[0,:],c=color_k,linestyle='--')
+      else:
+        pos = P1[k,:,:].squeeze()
+        plt.scatter(pos[0,0],pos[1,0],c=color_k)
+        plt.plot(pos[0,:], pos[1,:],c=color_k)
+
+        pos = P2[k,:,:].squeeze()
+        plt.scatter(pos[0,0],pos[1,0],c=color_k,marker='x')
+        plt.plot(pos[0,:], pos[1,:],c=color_k,linestyle='--')
 
     plt.grid()
-    
+    if flip_axis==True:
+        plt.gca().invert_yaxis() #flip y axis
+
     if save:
         plt.savefig(file+'.png',format='png')
         plt.savefig(file+'.pdf',format='pdf')
         plt.close('all')
     else:
         plt.show()
+    
